@@ -1,0 +1,92 @@
+[
+  {
+    "contestId": 1692,
+    "contestName": "Codeforces Round 799 (Div. 4)",
+    "handle": "Lisan-al-Gaib",
+    "rank": 18182,
+    "ratingUpdateTimeSeconds": 1655225400,
+    "oldRating": 0,
+    "newRating": 358
+  },
+  {
+    "contestId": 1729,
+    "contestName": "Codeforces Round 820 (Div. 3)",
+    "handle": "Lisan-al-Gaib",
+    "rank": 17252,
+    "ratingUpdateTimeSeconds": 1663001400,
+    "oldRating": 358,
+    "newRating": 570
+  },
+  {
+    "contestId": 1838,
+    "contestName": "Codeforces Round 877 (Div. 2)",
+    "handle": "Lisan-al-Gaib",
+    "rank": 11038,
+    "ratingUpdateTimeSeconds": 1685897100,
+    "oldRating": 570,
+    "newRating": 706
+  },
+  {
+    "contestId": 1989,
+    "contestName": "Educational Codeforces Round 167 (Rated for Div. 2)",
+    "handle": "Lisan-al-Gaib",
+    "rank": 10665,
+    "ratingUpdateTimeSeconds": 1719506100,
+    "oldRating": 706,
+    "newRating": 853
+  },
+  {
+    "contestId": 2061,
+    "contestName": "IAEPC Preliminary Contest (Codeforces Round 999, Div. 1 + Div. 2)",
+    "handle": "Lisan-al-Gaib",
+    "rank": 6513,
+    "ratingUpdateTimeSeconds": 1737394500,
+    "oldRating": 853,
+    "newRating": 1006
+  },
+  {
+    "contestId": 2116,
+    "contestName": "Codeforces Round 1028 (Div. 2)",
+    "handle": "Lisan-al-Gaib",
+    "rank": 15381,
+    "ratingUpdateTimeSeconds": 1748709300,
+    "oldRating": 1006,
+    "newRating": 949
+  },
+  {
+    "contestId": 2133,
+    "contestName": "Codeforces Round 1044 (Div. 2)",
+    "handle": "Lisan-al-Gaib",
+    "rank": 11943,
+    "ratingUpdateTimeSeconds": 1756053300,
+    "oldRating": 949,
+    "newRating": 967
+  },
+  {
+    "contestId": 2134,
+    "contestName": "Codeforces Round 1045 (Div. 2)",
+    "handle": "Lisan-al-Gaib",
+    "rank": 6107,
+    "ratingUpdateTimeSeconds": 1756226100,
+    "oldRating": 967,
+    "newRating": 1080
+  },
+  {
+    "contestId": 2194,
+    "contestName": "Codeforces Round 1078 (Div. 2)",
+    "handle": "Lisan-al-Gaib",
+    "rank": 11019,
+    "ratingUpdateTimeSeconds": 1770548700,
+    "oldRating": 1080,
+    "newRating": 1033
+  },
+  {
+    "contestId": 2229,
+    "contestName": "Spectral::Cup 2026 Round 2 (Codeforces Round 1100, Div. 1 + Div. 2)",
+    "handle": "Lisan-al-Gaib",
+    "rank": 4989,
+    "ratingUpdateTimeSeconds": 1779557700,
+    "oldRating": 1033,
+    "newRating": 1101
+  }
+]

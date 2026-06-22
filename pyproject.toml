@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "contestiq-core"
+version = "0.1.0"
+description = "ContestIQ Phase 1 Training Intelligence ML/Core backend foundation"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.7,<3",
+  "requests>=2.31,<3",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0,<9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

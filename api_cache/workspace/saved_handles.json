@@ -1,0 +1,12 @@
+{
+  "lisan-al-gaib": {
+    "handle": "Lisan-al-Gaib",
+    "created_at": "2026-06-08T21:30:27.144210+00:00",
+    "updated_at": "2026-06-08T21:35:08.548971+00:00",
+    "latest_analysis_id": "82ccde48-a489-412c-b9ad-008638892e9e",
+    "latest_analysis_created_at": "2026-06-08T21:30:27.128816+00:00",
+    "latest_queue_mode": "focused_practice",
+    "latest_model_version": "ml_core_v0.4",
+    "latest_share_id": "86f2b46b93a84828"
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "share_id": "86f2b46b93a84828",
+  "handle": "Lisan-al-Gaib",
+  "analysis_id": "82ccde48-a489-412c-b9ad-008638892e9e",
+  "created_at": "2026-06-08T21:30:43.613563+00:00",
+  "model_version": "ml_core_v0.4",
+  "public_report": {
+    "caveats": [
+      "Codeforces data does not reveal the true solving process.",
+      "This report does not verify skill, identity, or independent solving.",
+      "This is a training aid, not proof of ability."
+    ],
+    "handle": "Lisan-al-Gaib",
+    "created_at": "2026-06-08T21:30:27.128816+00:00",
+    "weakness_map_user": {
+      "likely_needs_work": [],
+      "watchlist": [
+        {
+          "skill_id": "sequence_search",
+          "display_name": "Sequence Search",
+          "bucket": "Watchlist",
+          "severity_score": 0.106,
+          "confidence_score": 0.744,
+          "confidence_band": "moderate / likely current friction",
+          "explanation": "Sequence Search shows tentative friction signals, but the evidence is not strong enough for a firm diagnosis.",
+          "visibility_reason": "Visible as cautious watchlist evidence within the max-3 cap."
+        },
+        {
+          "skill_id": "data_structures",
+          "display_name": "Data Structures",
+          "bucket": "Watchlist",
+          "severity_score": 0.285,
+          "confidence_score": 0.712,
+          "confidence_band": "moderate / likely current friction",
+          "explanation": "Data Structures shows tentative friction signals, but the evidence is not strong enough for a firm diagnosis.",
+          "visibility_reason": "Visible as cautious watchlist evidence within the max-3 cap."
+        },
+        {
+          "skill_id": "dynamic_programming",
+          "display_name": "Dynamic Programming",
+          "bucket": "Watchlist",
+          "severity_score": 0.275,
+          "confidence_score": 0.707,
+          "confidence_band": "moderate / likely current friction",
+          "explanation": "Dynamic Programming shows tentative friction signals, but the evidence is not strong enough for a firm diagnosis.",
+          "visibility_reason": "Visible as cautious watchlist evidence within the max-3 cap."
+        }
+      ],
+      "limited_evidence": [
+        {
+          "skill_id": "trees",
+          "display_name": "Trees",
+          "bucket": "Limited Evidence",
+          "severity_score": 0.413,
+          "confidence_score": 0.505,
+          "confidence_band": "tentative / watchlist only",
+          "explanation": "There is limited Trees evidence, so ContestIQ cannot make a reliable diagnosis there yet.",
+          "visibility_reason": "Visible as limited evidence within the max-5 cap."
+        },
+        {
+          "skill_id": "geometry",
+          "display_name": "Geometry",
+          "bucket": "Limited Evidence",
+          "severity_score": 0.0,
+          "confidence_score": 0.387,
+          "confidence_band": "tentative / watchlist only",
+          "explanation": "There is limited Geometry evidence, so ContestIQ cannot make a reliable diagnosis there yet.",
+          "visibility_reason": "Visible as limited evidence within the max-5 cap."
+        }
+      ]
+    },
+    "safe_interpretation": "Shareable training report based on public Codeforces history. This is not a verification result.",
+    "analysis_id": "82ccde48-a489-412c-b9ad-008638892e9e",
+    "warnings": [
+      "Codeforces provides history data, not full solving process data.",
+      "ContestIQ does not infer true start time, solo-work status, contest-integrity judgments, identity proof, or badge readiness from Codeforces-only data.",
+      "Wrong-answer counts can signal friction, but Codeforces data alone cannot confirm the underlying cause."
+    ],
+    "model_version": "ml_core_v0.4",
+    "daily_queue": {
+      "caveats": [
+        "Codeforces provides history data, not full solving process data.",
+        "ContestIQ does not infer true start time, solo-work status, contest-integrity judgments, identity proof, or badge readiness from Codeforces-only data.",
+        "Wrong-answer counts can signal friction, but Codeforces data alone cannot confirm the underlying cause."
+      ],
+      "queue_mode_reason": "No hard repair-safe skill passed thresholds; moderate high-confidence friction is routed to focused practice.",
+      "queue_mode": "focused_practice",
+      "evidence_quality_level": "sufficient",
+      "items": [
+        {
+          "slot_type": "focused_practice",
+          "problem_key": "1869B",
+          "explanation": "Recommended as focused practice: recent Codeforces history shows moderate friction in Graphs with enough evidence to make this useful for training, but not strong enough for a firm weakness label.",
+          "problem_name": "2D Traveling",
+          "rating": 1100,
+          "why_this_skill": "Graphs is the single anchor skill for a clear training explanation.",
+          "difficulty_reason": "Rated 1100, selected near the slot's target range.",
+          "risk_flags": [],
+          "tags": [
+            "geometry",
+            "math",
+            "shortest paths",
+            "sortings"
+          ],
+          "final_score": 0.6997,
+          "anchor_skill": "graphs",
+          "target_skill": "graphs",
+          "why_this_problem": "2D Traveling matched the queue slot and available Codeforces tag evidence.",
+          "why_this_slot": "This is targeted practice for moderate evidence, not a firm weakness label.",
+          "safety_note": "Based only on Codeforces public history; this is not a claim about mastery or solving process."
+        },
+        {
+          "slot_type": "maintenance",
+          "problem_key": "2226B",
+          "explanation": "Recommended as maintenance for Math / Number Theory, to keep a stable skill active without making a stronger claim than the data supports.",
+          "problem_name": "Everything Everywhere",
+          "rating": 900,
+          "why_this_skill": "Math Number Theory is the single anchor skill for a clear training explanation.",
+          "difficulty_reason": "Rated 900, selected near the slot's target range.",
+          "risk_flags": [],
+          "tags": [
+            "greedy",
+            "math",
+            "number theory"
+          ],
+          "final_score": 0.7261,
+          "anchor_skill": "math_number_theory",
+          "target_skill": "math_number_theory",
+          "why_this_problem": "Everything Everywhere matched the queue slot and available Codeforces tag evidence.",
+          "why_this_slot": "This is maintenance to keep an observed stable area active.",
+          "safety_note": "Based only on Codeforces public history; this is not a claim about mastery or solving process."
+        },
+        {
+          "slot_type": "stretch",
+          "problem_key": "2202B",
+          "explanation": "Recommended as a stretch problem anchored on Dynamic Programming, slightly above the estimated skill-specific ability.",
+          "problem_name": "ABAB Construction",
+          "rating": 1200,
+          "why_this_skill": "Dynamic Programming is the single anchor skill for a clear training explanation.",
+          "difficulty_reason": "Rated 1200, selected near the slot's target range.",
+          "risk_flags": [
+            "higher_challenge"
+          ],
+          "tags": [
+            "dp",
+            "greedy",
+            "implementation"
+          ],
+          "final_score": 0.7131,
+          "anchor_skill": "dynamic_programming",
+          "target_skill": "dynamic_programming",
+          "why_this_problem": "ABAB Construction matched the queue slot and available Codeforces tag evidence.",
+          "why_this_slot": "This is a stretch slot, chosen slightly above the estimated current range.",
+          "safety_note": "Based only on Codeforces public history; this is not a claim about mastery or solving process."
+        }
+      ]
+    },
+    "profile_summary": {
+      "handle": "Lisan-al-Gaib",
+      "overall_rating_prior": 1101,
+      "normalized_submissions": 194,
+      "user_problem_attempts": 80,
+      "solved_problem_attempts": 61
+    }
+  }
+}
