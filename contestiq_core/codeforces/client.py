@@ -56,6 +56,19 @@ def _request(endpoint: str, params: dict[str, Any] | None = None, use_cache: boo
             time.sleep(backoff)
             continue
 
+        # Codeforces answers HTTP 400 with a FAILED payload for bad input
+        # (e.g. unknown handle). Surface the comment immediately — retrying
+        # a bad request cannot succeed, and the comment text ("… not found")
+        # is what callers use to map the error correctly.
+        if response.status_code == 400:
+            try:
+                comment = response.json().get("comment", "")
+            except Exception:
+                comment = ""
+            raise CodeforcesAPIError(
+                f"Codeforces API error for {endpoint}: {comment or 'HTTP 400 (bad request)'}"
+            )
+
         try:
             response.raise_for_status()
             payload = response.json()
@@ -89,6 +102,13 @@ def fetch_user_status(handle: str, count: int | None = None) -> list[dict[str, A
 
 def fetch_user_rating(handle: str) -> list[dict[str, Any]]:
     return _request("user.rating", {"handle": handle})
+
+
+def fetch_user_info(handle: str) -> dict[str, Any]:
+    result = _request("user.info", {"handles": handle})
+    if not result:
+        raise CodeforcesAPIError(f"Codeforces handle not found: {handle}")
+    return result[0]
 
 
 def fetch_problemset_problems() -> dict[str, Any]:

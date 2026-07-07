@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, field_validator
 
 from contestiq_api.errors import APIError
@@ -21,7 +21,7 @@ _LANGUAGE_IDS: dict[str, int] = {
 }
 
 _UNSUPPORTED_MSG = (
-    "Unsupported language. SolveX MVP currently supports only C++17 and Python 3."
+    "Unsupported language. This MVP supports only C++17 and Python 3."
 )
 
 _MAX_SOURCE_BYTES = 100 * 1024
@@ -65,7 +65,11 @@ class ExecuteResponse(BaseModel):
 
 
 @router.post("/execute", response_model=ExecuteResponse)
-async def execute_code(req: ExecuteRequest) -> ExecuteResponse:
+async def execute_code(req: ExecuteRequest, request: Request = None) -> ExecuteResponse:
+    if request is not None:
+        from contestiq_api.throttle import throttle
+
+        throttle(request, "execute")
     if req.language not in _LANGUAGE_IDS:
         raise APIError("unsupported_language", _UNSUPPORTED_MSG, status_code=422)
 

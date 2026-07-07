@@ -3,4 +3,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.ruff_cache/
+.cache/
+api_cache/
 .DS_Store

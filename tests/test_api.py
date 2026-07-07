@@ -19,6 +19,7 @@ def _client(tmp_path, monkeypatch, extra_env=None):
     import contestiq_api.routes.analysis as analysis_routes
     import contestiq_api.routes.feedback as feedback_routes
     import contestiq_api.routes.health as health_routes
+    import contestiq_api.routes.execute as execute_routes
     import contestiq_api.routes.share as share_routes
     import contestiq_api.routes.workspace as workspace_routes
     import contestiq_api.main as main
@@ -31,6 +32,7 @@ def _client(tmp_path, monkeypatch, extra_env=None):
     importlib.reload(analysis_routes)
     importlib.reload(feedback_routes)
     importlib.reload(health_routes)
+    importlib.reload(execute_routes)
     importlib.reload(share_routes)
     importlib.reload(workspace_routes)
     importlib.reload(main)
@@ -46,17 +48,20 @@ def test_health_endpoint(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     response = client.get("/api/health")
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ok",
-        "service": "contestiq-api",
-        "model_version": "ml_core_v0.4",
-    }
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["service"] == "contestiq-api"
+    assert data["model_version"] == "ml_core_v0.4"
+    # Judge0 flags depend on the local .env; assert presence and type only.
+    assert isinstance(data["judge0_configured"], bool)
+    assert isinstance(data["judge0_reachable"], bool)
 
 
 def test_existing_route_paths_are_preserved(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     expected = {
         "/api/health",
+        "/api/execute",
         "/api/analyze",
         "/api/analysis/{handle}",
         "/api/analysis/{handle}/weakness-map",
@@ -79,6 +84,26 @@ def test_existing_route_paths_are_preserved(tmp_path, monkeypatch):
         "/api/workspace/dashboard",
     }
     assert expected.issubset(_route_paths(client))
+
+
+def test_execute_rejects_unsupported_language(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    response = client.post(
+        "/api/execute",
+        json={"language": "javascript", "source_code": "console.log('hi')", "stdin": ""},
+    )
+    assert response.status_code == 422
+    assert response.json() == {
+        "status": "failed",
+        "error_code": "unsupported_language",
+        "message": "Unsupported language. This MVP supports only C++17 and Python 3.",
+    }
+
+
+def test_execute_supported_language_ids_are_mvp_only():
+    from contestiq_api.routes.execute import _LANGUAGE_IDS
+
+    assert _LANGUAGE_IDS == {"cpp17": 54, "python3": 71}
 
 
 def test_settings_defaults(monkeypatch):
@@ -104,6 +129,7 @@ def test_custom_cors_origins_parse(monkeypatch):
 
 def test_production_settings_defaults(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("ADMIN_API_KEY", "prod-admin-key-0123456789")  # production requires it (Phase 09)
     monkeypatch.delenv("ENABLE_DEBUG_ENDPOINT", raising=False)
     monkeypatch.delenv("RATE_LIMIT_ANALYZE_SECONDS", raising=False)
     import contestiq_api.settings as settings
