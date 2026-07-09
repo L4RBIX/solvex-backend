@@ -334,6 +334,8 @@ def _rank_entries(members: list[dict[str, Any]], week_start: dt.date) -> list[di
             "weekly_report_viewed": stats["weekly_report_viewed"],
             "verification_attempts": stats["verification_attempts"],
             "badges_earned_this_week": stats["badges_earned_this_week"],
+            "duels_completed": stats.get("duels_completed", 0),
+            "duels_won": stats.get("duels_won", 0),
         })
 
     scored.sort(

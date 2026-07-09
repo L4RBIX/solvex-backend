@@ -760,6 +760,61 @@ CREATE TABLE IF NOT EXISTS leaderboard_invites (
 );
 CREATE INDEX IF NOT EXISTS idx_leaderboard_invites_board ON leaderboard_invites (leaderboard_id);
 
+CREATE TABLE IF NOT EXISTS duel_matches (
+    duel_id TEXT PRIMARY KEY,
+    creator_subject TEXT NOT NULL,
+    creator_user_id TEXT,
+    creator_handle TEXT,
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'waiting',
+    problem_id TEXT NOT NULL,
+    problem_rating INTEGER,
+    skill_id TEXT,
+    invite_code_hash TEXT UNIQUE NOT NULL,
+    starts_at TEXT,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    winner_subject TEXT,
+    result_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_duel_matches_creator ON duel_matches (creator_subject, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_duel_matches_status ON duel_matches (status, expires_at);
+
+CREATE TABLE IF NOT EXISTS duel_participants (
+    duel_id TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    user_id TEXT,
+    handle TEXT,
+    display_name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    joined_at TEXT NOT NULL,
+    ready_at TEXT,
+    final_status TEXT NOT NULL DEFAULT 'pending',
+    accepted_at TEXT,
+    best_attempt_id TEXT,
+    PRIMARY KEY (duel_id, subject)
+);
+CREATE INDEX IF NOT EXISTS idx_duel_participants_user ON duel_participants (user_id);
+CREATE INDEX IF NOT EXISTS idx_duel_participants_handle ON duel_participants (handle);
+
+CREATE TABLE IF NOT EXISTS duel_submissions (
+    submission_id TEXT PRIMARY KEY,
+    duel_id TEXT NOT NULL,
+    participant_subject TEXT NOT NULL,
+    language TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    judge_status TEXT NOT NULL,
+    passed INTEGER NOT NULL DEFAULT 0,
+    stdout_excerpt TEXT,
+    stderr_excerpt TEXT,
+    created_at TEXT NOT NULL,
+    judged_at TEXT,
+    runtime_ms INTEGER,
+    memory_kb INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_duel_submissions_duel ON duel_submissions (duel_id, created_at);
+
 CREATE TABLE IF NOT EXISTS cf_sync_jobs (
     id TEXT PRIMARY KEY,
     handle TEXT,

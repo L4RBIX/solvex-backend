@@ -507,6 +507,26 @@ curl "http://localhost:8000/api/v1/leaderboards/<id>/weekly?handle=tourist"
 
 Weekly rank tie-breakers: `weekly_xp` → `active_days` → `feedback_count` →
 `joined_at`. Only members can view standings; invite codes are stored hashed.
+Weekly entries also surface `duels_completed` / `duels_won` (secondary stats).
+
+## Product G4 Friend 1v1 Duels
+
+Invite-only private matches. Same CF catalog problem for both players; first
+accepted Judge0 submission wins. Modes: `rapid_10` (10 min) and `classic_30`
+(30 min). No matchmaking, Elo, tournaments, or chat.
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/duels?handle=tourist" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"rapid_10","display_name":"Tourist"}'
+curl -X POST http://localhost:8000/api/v1/duels/join \
+  -H "Content-Type: application/json" \
+  -d '{"invite_code":"<code>","display_name":"Friend","handle":"friend"}'
+curl -X POST "http://localhost:8000/api/v1/duels/<id>/start?handle=tourist"
+```
+
+XP: `duel_completed` +10, `duel_won` +15 (daily-capped). Creating/joining alone
+awards no XP.
 
 ## Future Phases
 

@@ -30,6 +30,9 @@ XP_RULES: dict[str, int] = {
     "verification_attempted": 25,
     "premium_conversion": 50,
     "plan_started": 15,
+    # Phase G4: only completed/won award XP (create/join/start are tracked but 0 XP).
+    "duel_completed": 10,
+    "duel_won": 15,
 }
 
 MEANINGFUL_EVENT_TYPES = frozenset(XP_RULES)
@@ -46,6 +49,8 @@ EVENT_LABELS: dict[str, str] = {
     "verification_attempted": "Attempted SkillTrace verification",
     "premium_conversion": "Upgraded to premium",
     "plan_started": "Started a training plan",
+    "duel_completed": "Completed a friend duel",
+    "duel_won": "Won a friend duel",
 }
 
 # Daily XP cap by plan. Team/event/admin share a single higher beta ceiling
@@ -516,6 +521,8 @@ def compute_weekly_stats(
     feedback_count = sum(1 for e in week_events if e["event_type"] == "feedback_submitted")
     weekly_report_viewed = any(e["event_type"] == "weekly_report_generated" for e in week_events)
     verification_attempts = sum(1 for e in week_events if e["event_type"] == "verification_attempted")
+    duels_completed = sum(1 for e in week_events if e["event_type"] == "duel_completed")
+    duels_won = sum(1 for e in week_events if e["event_type"] == "duel_won")
 
     all_time_xp = compute_xp_total(meaningful, daily_cap)
     badges = compute_badges(meaningful)
@@ -534,6 +541,8 @@ def compute_weekly_stats(
         "verification_attempts": verification_attempts,
         "daily_goals_completed": daily_goals_completed,
         "badges_earned_this_week": badges_earned_this_week,
+        "duels_completed": duels_completed,
+        "duels_won": duels_won,
         "level": level_for_xp(all_time_xp),
     }
 

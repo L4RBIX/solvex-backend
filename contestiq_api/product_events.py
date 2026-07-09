@@ -23,6 +23,12 @@ EVENT_TYPES = {
     "weekly_report_generated",
     "verification_attempted",
     "premium_conversion",
+    # Phase G4 friend duels — only completed/won count for XP (no farm from abandoned creates).
+    "duel_created",
+    "duel_joined",
+    "duel_started",
+    "duel_completed",
+    "duel_won",
 }
 
 
