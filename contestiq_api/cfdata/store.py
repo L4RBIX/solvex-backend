@@ -776,7 +776,9 @@ CREATE TABLE IF NOT EXISTS duel_matches (
     created_at TEXT NOT NULL,
     completed_at TEXT,
     winner_subject TEXT,
-    result_reason TEXT
+    result_reason TEXT,
+    countdown_started_at TEXT,
+    winner_decided_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_duel_matches_creator ON duel_matches (creator_subject, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_duel_matches_status ON duel_matches (status, expires_at);
@@ -793,10 +795,25 @@ CREATE TABLE IF NOT EXISTS duel_participants (
     final_status TEXT NOT NULL DEFAULT 'pending',
     accepted_at TEXT,
     best_attempt_id TEXT,
+    hint_count INTEGER NOT NULL DEFAULT 0,
+    wrong_attempts INTEGER NOT NULL DEFAULT 0,
+    judging_at TEXT,
+    last_seen_at TEXT,
+    arena_opened_at TEXT,
     PRIMARY KEY (duel_id, subject)
 );
 CREATE INDEX IF NOT EXISTS idx_duel_participants_user ON duel_participants (user_id);
 CREATE INDEX IF NOT EXISTS idx_duel_participants_handle ON duel_participants (handle);
+
+CREATE TABLE IF NOT EXISTS duel_hints (
+    hint_id TEXT PRIMARY KEY,
+    duel_id TEXT NOT NULL,
+    participant_subject TEXT NOT NULL,
+    hint_number INTEGER NOT NULL,
+    hint_text TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_duel_hints_duel ON duel_hints (duel_id, participant_subject, hint_number);
 
 CREATE TABLE IF NOT EXISTS duel_submissions (
     submission_id TEXT PRIMARY KEY,
@@ -844,12 +861,45 @@ def params_hash(params: dict[str, Any] | None) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+# Columns added after a table already shipped (mirrors db/migrations/019+).
+# CREATE TABLE IF NOT EXISTS never alters existing tables, so pre-existing
+# databases (e.g. the Railway volume) get them via ALTER TABLE here.
+_COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
+    "duel_participants": [
+        ("hint_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("wrong_attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("judging_at", "TEXT"),
+        ("last_seen_at", "TEXT"),
+        ("arena_opened_at", "TEXT"),
+    ],
+    "duel_matches": [
+        ("countdown_started_at", "TEXT"),
+        ("winner_decided_at", "TEXT"),
+    ],
+}
+
+_column_migrations_done: set[str] = set()
+
+
+def _apply_column_migrations(conn: sqlite3.Connection, path: str) -> None:
+    if path in _column_migrations_done:
+        return
+    for table, columns in _COLUMN_MIGRATIONS.items():
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name, ddl in columns:
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+    conn.commit()
+    _column_migrations_done.add(path)
+
+
 def connect() -> sqlite3.Connection:
     path = Path(get_settings().database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=30.0)  # tolerate concurrent writers
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    _apply_column_migrations(conn, str(path.resolve()))
     return conn
 
 

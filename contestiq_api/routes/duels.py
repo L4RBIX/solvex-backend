@@ -126,6 +126,75 @@ def get_duel(
     return result
 
 
+@router.get("/{duel_id}/state")
+def duel_state(
+    duel_id: str,
+    request: Request,
+    handle: str | None = Query(default=None, min_length=3, max_length=24),
+):
+    """Lightweight participant-only state for 1–2s polling (room + Arena)."""
+    finish = _timed("state")
+    try:
+        caller = _caller(request, handle)
+        result = duels.duel_state(duel_id, caller["aliases"])
+    except Exception:
+        finish(ok=False)
+        raise
+    finish(ok=True)
+    return result
+
+
+@router.post("/{duel_id}/ready")
+def ready_duel(
+    duel_id: str,
+    request: Request,
+    handle: str | None = Query(default=None, min_length=3, max_length=24),
+):
+    finish = _timed("ready")
+    try:
+        caller = _caller(request, handle)
+        result = duels.mark_ready(duel_id, caller["aliases"])
+    except Exception:
+        finish(ok=False)
+        raise
+    finish(ok=True)
+    return result
+
+
+@router.post("/{duel_id}/open-arena")
+def open_arena(
+    duel_id: str,
+    request: Request,
+    handle: str | None = Query(default=None, min_length=3, max_length=24),
+):
+    finish = _timed("open_arena")
+    try:
+        caller = _caller(request, handle)
+        result = duels.open_arena(duel_id, caller["aliases"])
+    except Exception:
+        finish(ok=False)
+        raise
+    finish(ok=True)
+    return result
+
+
+@router.post("/{duel_id}/hint")
+def duel_hint(
+    duel_id: str,
+    request: Request,
+    handle: str | None = Query(default=None, min_length=3, max_length=24),
+):
+    finish = _timed("hint")
+    try:
+        caller = _caller(request, handle)
+        result = duels.use_hint(duel_id, caller["aliases"])
+    except Exception:
+        finish(ok=False)
+        raise
+    finish(ok=True)
+    return result
+
+
 @router.post("/{duel_id}/start")
 def start_duel(
     duel_id: str,

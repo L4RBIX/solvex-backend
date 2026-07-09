@@ -29,6 +29,10 @@ EVENT_TYPES = {
     "duel_started",
     "duel_completed",
     "duel_won",
+    # Phase G4.1 live duel room — telemetry only, zero XP (hints must never earn XP).
+    "duel_ready",
+    "duel_arena_opened",
+    "duel_hint_used",
 }
 
 

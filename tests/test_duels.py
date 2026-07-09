@@ -147,6 +147,8 @@ def test_duel_starts_with_two_participants(client, catalog):
         "/api/v1/duels/join",
         json={"invite_code": created["invite_code"], "display_name": "Challenger", "handle": HANDLE_B},
     )
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_A}")
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_B}")
     response = client.post(f"/api/v1/duels/{created['duel_id']}/start?handle={HANDLE_A}")
     assert response.status_code == 200
     data = response.json()
@@ -165,13 +167,23 @@ def test_problem_assigned_from_catalog(client, catalog):
 # ─── Winner rules ─────────────────────────────────────────────────────────────
 
 
+def _skip_countdown(duel_id):
+    """Rewind starts_at so tests can submit without waiting the 3-2-1 countdown."""
+    past = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=1)).isoformat()
+    with store.connect() as conn:
+        conn.execute("UPDATE duel_matches SET starts_at = ? WHERE duel_id = ?", (past, duel_id))
+
+
 def _seed_active_duel(client):
     created = _create(client).json()
     client.post(
         "/api/v1/duels/join",
         json={"invite_code": created["invite_code"], "display_name": "Challenger", "handle": HANDLE_B},
     )
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_A}")
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_B}")
     client.post(f"/api/v1/duels/{created['duel_id']}/start?handle={HANDLE_A}")
+    _skip_countdown(created["duel_id"])
     return created
 
 
@@ -215,7 +227,7 @@ def test_earlier_accepted_submission_wins_tie(client, catalog):
             "UPDATE duel_participants SET accepted_at = ?, final_status = 'accepted' WHERE duel_id = ? AND handle = ?",
             (later, duel_id, HANDLE_A.lower()),
         )
-    duels._decide_winner_if_ready(duel_id)
+    duels._finalize_duel(duel_id, at_timeout=False)
     duel = duels.get_duel(duel_id)
     assert duel["status"] == "completed"
     assert duel["winner_subject"] == f"handle:{HANDLE_B.lower()}"
@@ -245,7 +257,7 @@ def test_source_code_secrets_not_exposed(client, catalog):
             gs.return_value.judge0_api_host = ""
             client.post(
                 f"/api/v1/duels/{created['duel_id']}/submit?handle={HANDLE_A}",
-                json={"language": "python3", "source_code": "SECRET_SOURCE_CODE_XYZ", "stdin": ""},
+                json={"language": "python3", "source_code": "SECRET_SOURCE_CODE_XYZ", "stdin": "", "expected_output": "1"},
             )
     detail = client.get(f"/api/v1/duels/{created['duel_id']}?handle={HANDLE_A}").json()
     raw = json.dumps(detail)
@@ -273,7 +285,10 @@ def test_product_events_emitted_for_completed_duel_only(client, catalog):
         "/api/v1/duels/join",
         json={"invite_code": created["invite_code"], "display_name": "Challenger", "handle": HANDLE_B},
     )
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_A}")
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_B}")
     client.post(f"/api/v1/duels/{created['duel_id']}/start?handle={HANDLE_A}")
+    _skip_countdown(created["duel_id"])
     mock_result = {
         "status": "accepted", "passed": True, "stdout": "1", "stderr": "",
         "compile_output": "", "time_ms": 1, "memory_kb": 1, "message": "ok",
