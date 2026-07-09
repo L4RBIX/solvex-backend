@@ -27,6 +27,7 @@ from contestiq_api.routes import (
     feedback,
     gamification,
     health,
+    leaderboards,
     recommendations,
     share,
     sync,
@@ -183,3 +184,4 @@ app.include_router(feedback.router)
 app.include_router(copilot.router)
 app.include_router(coach.router)
 app.include_router(gamification.router)
+app.include_router(leaderboards.router)

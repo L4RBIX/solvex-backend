@@ -480,6 +480,64 @@ def resolve_daily_cap(plan: str) -> int:
     return DAILY_XP_CAP.get(plan, DEFAULT_DAILY_XP_CAP)
 
 
+def compute_weekly_stats(
+    events: list[dict[str, Any]],
+    plan: str,
+    week_start: dt.date | None = None,
+) -> dict[str, Any]:
+    """Derive one member's ISO-week training stats from product_events.
+
+    Used by private weekly leaderboards (Phase G3). Reuses the same XP rules,
+    daily caps, and meaningful-event filter as G1/G2 — page visits and other
+    non-training events never enter product_events, so they cannot inflate scores.
+    """
+    today = dt.datetime.now(dt.timezone.utc).date()
+    start = week_start or week_start_for(today)
+    end = start + dt.timedelta(days=7)
+    daily_cap = resolve_daily_cap(plan)
+    meaningful = _meaningful(events)
+    week_events = [e for e in meaningful if start <= _event_date(e) < end]
+
+    by_day: dict[dt.date, set[str]] = {}
+    for event in week_events:
+        by_day.setdefault(_event_date(event), set()).add(event["event_type"])
+
+    weekly_xp = 0
+    daily_goals_completed = 0
+    for day, types in by_day.items():
+        day_raw = sum(XP_RULES[t] for t in types)
+        weekly_xp += min(day_raw, daily_cap)
+        completed_categories = sum(1 for _gid, _label, qualifying in GOAL_ITEM_DEFS if types & qualifying)
+        if completed_categories >= DAILY_GOAL_REQUIRED_COUNT:
+            daily_goals_completed += 1
+
+    active_days = len(by_day)
+    queues_generated = sum(1 for e in week_events if e["event_type"] in _QUEUE_EVENT_TYPES)
+    feedback_count = sum(1 for e in week_events if e["event_type"] == "feedback_submitted")
+    weekly_report_viewed = any(e["event_type"] == "weekly_report_generated" for e in week_events)
+    verification_attempts = sum(1 for e in week_events if e["event_type"] == "verification_attempted")
+
+    all_time_xp = compute_xp_total(meaningful, daily_cap)
+    badges = compute_badges(meaningful)
+    badges_earned_this_week = sum(
+        1 for b in badges
+        if start.isoformat() <= str(b.get("earned_at", ""))[:10] < end.isoformat()
+    )
+
+    return {
+        "week_start": start.isoformat(),
+        "weekly_xp": weekly_xp,
+        "active_days": active_days,
+        "queues_generated": queues_generated,
+        "feedback_count": feedback_count,
+        "weekly_report_viewed": weekly_report_viewed,
+        "verification_attempts": verification_attempts,
+        "daily_goals_completed": daily_goals_completed,
+        "badges_earned_this_week": badges_earned_this_week,
+        "level": level_for_xp(all_time_xp),
+    }
+
+
 def build_snapshot(
     subject: str,
     plan: str,

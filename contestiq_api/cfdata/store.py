@@ -725,6 +725,41 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
 );
 CREATE INDEX IF NOT EXISTS idx_weekly_reports_handle ON weekly_reports (handle, week_start DESC);
 
+CREATE TABLE IF NOT EXISTS leaderboard_groups (
+    leaderboard_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    owner_subject TEXT NOT NULL,
+    owner_user_id TEXT,
+    visibility TEXT NOT NULL DEFAULT 'private',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_leaderboard_groups_owner ON leaderboard_groups (owner_user_id);
+
+CREATE TABLE IF NOT EXISTS leaderboard_members (
+    leaderboard_id TEXT NOT NULL,
+    member_subject TEXT NOT NULL,
+    user_id TEXT,
+    handle TEXT,
+    display_name TEXT NOT NULL,
+    member_role TEXT NOT NULL DEFAULT 'member',
+    joined_at TEXT NOT NULL,
+    PRIMARY KEY (leaderboard_id, member_subject)
+);
+CREATE INDEX IF NOT EXISTS idx_leaderboard_members_user ON leaderboard_members (user_id);
+CREATE INDEX IF NOT EXISTS idx_leaderboard_members_handle ON leaderboard_members (handle);
+
+CREATE TABLE IF NOT EXISTS leaderboard_invites (
+    invite_id TEXT PRIMARY KEY,
+    leaderboard_id TEXT NOT NULL,
+    invite_code_hash TEXT UNIQUE NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_leaderboard_invites_board ON leaderboard_invites (leaderboard_id);
+
 CREATE TABLE IF NOT EXISTS cf_sync_jobs (
     id TEXT PRIMARY KEY,
     handle TEXT,

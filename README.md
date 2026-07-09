@@ -489,6 +489,25 @@ curl "http://localhost:8000/api/v1/gamification/activity?handle=tourist"
 curl "http://localhost:8000/api/v1/gamification/quests?handle=tourist"
 ```
 
+## Product G3 Private Weekly Leaderboards
+
+Invite-only groups where members compete on real training activity for the
+current ISO week. Scores are computed live from `product_events` via
+gamification XP rules — no global leaderboard, no PvP duels, no public profiles.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/leaderboards?handle=tourist \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Study Squad","display_name":"Tourist"}'
+curl -X POST http://localhost:8000/api/v1/leaderboards/join \
+  -H "Content-Type: application/json" \
+  -d '{"invite_code":"<code>","display_name":"Friend","handle":"friend"}'
+curl "http://localhost:8000/api/v1/leaderboards/<id>/weekly?handle=tourist"
+```
+
+Weekly rank tie-breakers: `weekly_xp` → `active_days` → `feedback_count` →
+`joined_at`. Only members can view standings; invite codes are stored hashed.
+
 ## Future Phases
 
 - FastAPI endpoints
