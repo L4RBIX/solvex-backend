@@ -137,6 +137,40 @@ def gamification_badges(request: Request, handle: str | None = Query(default=Non
     return {"subject": snapshot["subject"], "badges": snapshot["badges"]}
 
 
+@router.get("/activity")
+def gamification_activity(request: Request, handle: str | None = Query(default=None, min_length=3, max_length=24)):
+    """Recent XP breakdown (Phase G2 transparency): the last few meaningful
+    events with the XP each one actually awarded, including 0-XP entries when
+    the daily cap (or the once-per-day-per-type rule) applied."""
+    finish = _timed("activity")
+    try:
+        snapshot = _snapshot_for(request, handle)
+    except Exception:
+        finish(ok=False)
+        raise
+    finish(ok=True)
+    return {"subject": snapshot["subject"], "recent_xp_events": snapshot["recent_xp_events"]}
+
+
+@router.get("/quests")
+def gamification_quests(request: Request, handle: str | None = Query(default=None, min_length=3, max_length=24)):
+    """Daily + weekly quests (Phase G2). Progress UI only — quests never award
+    XP themselves, so they cannot double-count or bypass the daily cap."""
+    finish = _timed("quests")
+    try:
+        snapshot = _snapshot_for(request, handle)
+    except Exception:
+        finish(ok=False)
+        raise
+    finish(ok=True)
+    return {
+        "subject": snapshot["subject"],
+        "daily_quests": snapshot["daily_quests"],
+        "weekly_quests": snapshot["weekly_quests"],
+        "milestones": snapshot["milestones"],
+    }
+
+
 class RecomputeRequest(BaseModel):
     handle: str | None = Field(default=None, min_length=3, max_length=24)
     user_id: str | None = None

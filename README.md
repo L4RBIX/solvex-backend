@@ -463,6 +463,32 @@ day. Badges (`first_analysis`, `first_queue`, `feedback_loop`,
 event history, so they are naturally earned exactly once and never
 double-fire on recompute.
 
+## Product G2 Gamification Transparency & Quests
+
+Phase G2 extends `/api/v1/gamification/me` with additive fields (G1 fields
+unchanged). No new tables — everything is still derived from `product_events`.
+
+G1 transparency fix:
+- `recent_xp_events`: last 10 meaningful events with `label`, `xp_awarded`,
+  `occurred_at`, and `daily_cap_applied` (shows when the daily cap limited XP).
+
+G2 quests (progress UI only — quests never award XP themselves):
+- `daily_quests`: 6 today-only quests (analysis, queue, feedback, report, plan,
+  verification).
+- `weekly_quests`: 5 ISO-week quests with `progress`/`target` (active days,
+  queues, feedback, report, verification).
+- `milestones`: next level, streak badge, daily goal, weekly quest targets.
+
+Badge details now include `category` (onboarding/consistency/verification/premium)
+and `rarity` (common/uncommon/rare).
+
+Additional endpoints:
+
+```bash
+curl "http://localhost:8000/api/v1/gamification/activity?handle=tourist"
+curl "http://localhost:8000/api/v1/gamification/quests?handle=tourist"
+```
+
 ## Future Phases
 
 - FastAPI endpoints

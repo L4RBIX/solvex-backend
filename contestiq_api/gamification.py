@@ -34,6 +34,20 @@ XP_RULES: dict[str, int] = {
 
 MEANINGFUL_EVENT_TYPES = frozenset(XP_RULES)
 
+# Human-readable labels for the XP activity breakdown (Phase G2 transparency).
+# These are the only event details ever exposed to the client — raw
+# product_event payloads (`properties`) are never included in any response.
+EVENT_LABELS: dict[str, str] = {
+    "first_analysis_completed": "Completed first analysis",
+    "first_queue_generated": "Generated first queue",
+    "daily_queue_generated": "Generated today's queue",
+    "feedback_submitted": "Submitted problem feedback",
+    "weekly_report_generated": "Viewed weekly report",
+    "verification_attempted": "Attempted SkillTrace verification",
+    "premium_conversion": "Upgraded to premium",
+    "plan_started": "Started a training plan",
+}
+
 # Daily XP cap by plan. Team/event/admin share a single higher beta ceiling
 # per the spec (no dedicated per-plan entitlement exists yet for XP).
 DAILY_XP_CAP: dict[str, int] = {
@@ -118,15 +132,26 @@ GOAL_ITEM_DEFS: tuple[tuple[str, str, frozenset[str]], ...] = (
 
 # ─── Badges (v1) ──────────────────────────────────────────────────────────────
 
+# Categories: onboarding | consistency | verification | premium.
+# Rarity: common | uncommon | rare. Purely descriptive labels for the widget —
+# no mastery claim, no social comparison, no public profile attached.
 BADGE_DEFS: tuple[dict[str, str], ...] = (
-    {"id": "first_analysis", "name": "First Diagnosis", "description": "Completed your first SolveX analysis."},
-    {"id": "first_queue", "name": "Queued Up", "description": "Generated your first daily training queue."},
-    {"id": "feedback_loop", "name": "Feedback Loop", "description": "Submitted your first problem feedback."},
-    {"id": "three_day_streak", "name": "3-Day Streak", "description": "Trained on 3 consecutive days."},
-    {"id": "seven_day_streak", "name": "7-Day Streak", "description": "Trained on 7 consecutive days."},
-    {"id": "first_weekly_report", "name": "First Weekly Report", "description": "Generated your first weekly progress report."},
-    {"id": "first_verification_attempt", "name": "Put To The Test", "description": "Attempted your first SkillTrace verification."},
-    {"id": "beta_premium", "name": "Beta Premium", "description": "Upgraded to a premium SolveX plan."},
+    {"id": "first_analysis", "name": "First Diagnosis", "description": "Completed your first SolveX analysis.",
+     "category": "onboarding", "rarity": "common"},
+    {"id": "first_queue", "name": "Queued Up", "description": "Generated your first daily training queue.",
+     "category": "onboarding", "rarity": "common"},
+    {"id": "feedback_loop", "name": "Feedback Loop", "description": "Submitted your first problem feedback.",
+     "category": "onboarding", "rarity": "common"},
+    {"id": "three_day_streak", "name": "3-Day Streak", "description": "Trained on 3 consecutive days.",
+     "category": "consistency", "rarity": "uncommon"},
+    {"id": "seven_day_streak", "name": "7-Day Streak", "description": "Trained on 7 consecutive days.",
+     "category": "consistency", "rarity": "rare"},
+    {"id": "first_weekly_report", "name": "First Weekly Report", "description": "Generated your first weekly progress report.",
+     "category": "consistency", "rarity": "uncommon"},
+    {"id": "first_verification_attempt", "name": "Put To The Test", "description": "Attempted your first SkillTrace verification.",
+     "category": "verification", "rarity": "uncommon"},
+    {"id": "beta_premium", "name": "Beta Premium", "description": "Upgraded to a premium SolveX plan.",
+     "category": "premium", "rarity": "rare"},
 )
 
 _BADGE_FIRST_EVENT: dict[str, str] = {
@@ -272,6 +297,185 @@ def compute_badges(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return earned
 
 
+# ─── Recent XP events (Phase G2 transparency) ────────────────────────────────
+#
+# Per-event XP attribution replays history with the same two rules as
+# compute_xp_total (each event type earns at most once per UTC day; the day
+# total is capped by plan), so the per-event awards always sum to xp_total.
+# Only event_type / label / xp / timestamp are exposed — never the raw
+# product_event `properties` payload, which may carry internal identifiers.
+
+RECENT_XP_EVENTS_LIMIT = 10
+
+
+def compute_recent_xp_events(
+    events: list[dict[str, Any]], daily_cap: int, limit: int = RECENT_XP_EVENTS_LIMIT
+) -> list[dict[str, Any]]:
+    day_types: dict[dt.date, set[str]] = {}
+    day_totals: dict[dt.date, int] = {}
+    attributed: list[dict[str, Any]] = []
+    for event in _meaningful(events):  # chronological replay
+        day = _event_date(event)
+        etype = event["event_type"]
+        awarded_types = day_types.setdefault(day, set())
+        raw = XP_RULES[etype]
+        if etype in awarded_types:
+            # Repeating the same action within a day never re-awards XP —
+            # this is the anti-farming rule, not the daily cap.
+            awarded, cap_applied = 0, False
+        else:
+            remaining = max(0, daily_cap - day_totals.get(day, 0))
+            awarded = min(raw, remaining)
+            cap_applied = awarded < raw
+            awarded_types.add(etype)
+            day_totals[day] = day_totals.get(day, 0) + awarded
+        attributed.append({
+            "event_type": etype,
+            "label": EVENT_LABELS.get(etype, etype),
+            "xp_awarded": awarded,
+            "occurred_at": event["created_at"],
+            "daily_cap_applied": cap_applied,
+        })
+    return list(reversed(attributed[-limit:]))  # most recent first
+
+
+# ─── Quests (Phase G2) ────────────────────────────────────────────────────────
+#
+# Quests are progress UI only: they are derived from the same product_events
+# and award no XP themselves, so they can never double-count or bypass the
+# daily cap. Completion is judged per UTC day / ISO week (Monday start).
+
+DAILY_QUEST_DEFS: tuple[tuple[str, str, frozenset[str]], ...] = (
+    ("complete_analysis_today", "Complete an analysis", frozenset({"first_analysis_completed"})),
+    ("generate_queue_today", "Generate today's queue", frozenset({"first_queue_generated", "daily_queue_generated"})),
+    ("submit_feedback_today", "Give feedback on one recommendation", frozenset({"feedback_submitted"})),
+    ("view_weekly_report_today", "View weekly report", frozenset({"weekly_report_generated"})),
+    ("start_plan_today", "Start a training plan", frozenset({"plan_started"})),
+    ("attempt_verification_today", "Attempt SkillTrace verification", frozenset({"verification_attempted"})),
+)
+
+_QUEUE_EVENT_TYPES = frozenset({"first_queue_generated", "daily_queue_generated"})
+
+
+def compute_daily_quests(events: list[dict[str, Any]], today: dt.date | None = None) -> dict[str, Any]:
+    today = today or dt.datetime.now(dt.timezone.utc).date()
+    first_ts_today: dict[str, str] = {}
+    for event in _meaningful(events):
+        if _event_date(event) == today:
+            first_ts_today.setdefault(event["event_type"], event["created_at"])
+
+    quests = []
+    completed_count = 0
+    for quest_id, label, qualifying in DAILY_QUEST_DEFS:
+        completed_at = min((first_ts_today[t] for t in qualifying if t in first_ts_today), default=None)
+        completed = completed_at is not None
+        if completed:
+            completed_count += 1
+        quests.append({"id": quest_id, "label": label, "completed": completed, "completed_at": completed_at})
+
+    return {
+        "date": today.isoformat(),
+        "completed_count": completed_count,
+        "total_count": len(DAILY_QUEST_DEFS),
+        "quests": quests,
+    }
+
+
+def week_start_for(day: dt.date) -> dt.date:
+    return day - dt.timedelta(days=day.weekday())  # ISO week, Monday start
+
+
+def compute_weekly_quests(events: list[dict[str, Any]], today: dt.date | None = None) -> dict[str, Any]:
+    today = today or dt.datetime.now(dt.timezone.utc).date()
+    start = week_start_for(today)
+    end = start + dt.timedelta(days=7)
+    week_events = [e for e in _meaningful(events) if start <= _event_date(e) < end]
+
+    active_days = {_event_date(e) for e in week_events}
+    # Distinct days (not raw event count) so regenerating one day's queue
+    # repeatedly cannot complete a "3 queues" quest.
+    queue_days = {_event_date(e) for e in week_events if e["event_type"] in _QUEUE_EVENT_TYPES}
+    feedback_count = sum(1 for e in week_events if e["event_type"] == "feedback_submitted")
+    report_done = any(e["event_type"] == "weekly_report_generated" for e in week_events)
+    verification_done = any(e["event_type"] == "verification_attempted" for e in week_events)
+
+    raw_quests: tuple[tuple[str, str, int, int], ...] = (
+        ("active_3_days_this_week", "Train on 3 different days this week", len(active_days), 3),
+        ("complete_3_queues_this_week", "Generate 3 daily queues this week", len(queue_days), 3),
+        ("submit_3_feedback_this_week", "Give feedback on 3 recommendations", feedback_count, 3),
+        ("complete_weekly_report", "View weekly report", 1 if report_done else 0, 1),
+        ("attempt_one_verification", "Attempt one SkillTrace verification", 1 if verification_done else 0, 1),
+    )
+
+    quests = []
+    completed_count = 0
+    for quest_id, label, progress, target in raw_quests:
+        completed = progress >= target
+        if completed:
+            completed_count += 1
+        quests.append({
+            "id": quest_id,
+            "label": label,
+            "completed": completed,
+            "progress": min(progress, target),
+            "target": target,
+        })
+
+    return {
+        "week_start": start.isoformat(),
+        "completed_count": completed_count,
+        "total_count": len(raw_quests),
+        "quests": quests,
+    }
+
+
+# ─── Milestones (Phase G2) ────────────────────────────────────────────────────
+
+
+def compute_milestones(
+    xp_total: int,
+    streak: dict[str, Any],
+    daily_goal: dict[str, Any],
+    weekly_quests: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Small forward-looking targets derived from already-computed state.
+    Ordered by usefulness; the widget shows only the first few."""
+    milestones: list[dict[str, Any]] = []
+
+    level = level_for_xp(xp_total)
+    milestones.append({
+        "id": "next_level",
+        "label": f"Reach Level {level + 1}",
+        "progress": xp_total,
+        "target": level_threshold(level + 1),
+    })
+
+    current_streak = int(streak.get("current", 0))
+    if current_streak < 3:
+        milestones.append({"id": "next_streak_badge", "label": "Reach a 3-day streak", "progress": current_streak, "target": 3})
+    elif current_streak < 7:
+        milestones.append({"id": "next_streak_badge", "label": "Reach a 7-day streak", "progress": current_streak, "target": 7})
+
+    if not daily_goal.get("completed"):
+        milestones.append({
+            "id": "next_daily_goal",
+            "label": "Complete today's daily goal",
+            "progress": daily_goal.get("completed_count", 0),
+            "target": daily_goal.get("required_count", DAILY_GOAL_REQUIRED_COUNT),
+        })
+
+    next_weekly = next((q for q in weekly_quests.get("quests", []) if not q["completed"]), None)
+    if next_weekly is not None:
+        milestones.append({
+            "id": "next_weekly_quest",
+            "label": next_weekly["label"],
+            "progress": next_weekly["progress"],
+            "target": next_weekly["target"],
+        })
+
+    return milestones
+
+
 def resolve_daily_cap(plan: str) -> int:
     return DAILY_XP_CAP.get(plan, DEFAULT_DAILY_XP_CAP)
 
@@ -291,13 +495,21 @@ def build_snapshot(
     meaningful = _meaningful(events)
 
     xp_total = compute_xp_total(meaningful, daily_cap)
+    streak = compute_streak(meaningful, today)
+    daily_goal = compute_daily_goal(meaningful, today)
+    weekly_quests = compute_weekly_quests(meaningful, today)
     return {
         "subject": subject,
         "plan": plan,
         "xp_total": xp_total,
         "level": level_for_xp(xp_total),
         "level_progress": level_progress(xp_total),
-        "streak": compute_streak(meaningful, today),
-        "daily_goal": compute_daily_goal(meaningful, today),
+        "streak": streak,
+        "daily_goal": daily_goal,
         "badges": compute_badges(meaningful),
+        # Phase G2 additions (purely additive — G1 fields above are unchanged):
+        "recent_xp_events": compute_recent_xp_events(meaningful, daily_cap),
+        "daily_quests": compute_daily_quests(meaningful, today),
+        "weekly_quests": weekly_quests,
+        "milestones": compute_milestones(xp_total, streak, daily_goal, weekly_quests),
     }

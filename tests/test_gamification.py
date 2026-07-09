@@ -306,7 +306,10 @@ def test_gamification_me_response_contract(client):
     assert response.status_code == 200
     data = response.json()
     assert set(data.keys()) == {
+        # G1 fields (backward-compatible, unchanged shapes)
         "subject", "plan", "xp_total", "level", "level_progress", "streak", "daily_goal", "badges",
+        # G2 additive fields
+        "recent_xp_events", "daily_quests", "weekly_quests", "milestones",
     }
     assert data["subject"] == f"handle:{HANDLE.lower()}"
     assert data["plan"] == "free"
