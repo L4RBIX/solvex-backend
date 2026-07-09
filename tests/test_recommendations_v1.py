@@ -335,6 +335,53 @@ def test_queue_without_analysis_run_warns():
     assert "no_analysis_run_found_run_weakness_analyze_first" in result["warnings"]
 
 
+def test_fallback_fills_queue_floor_when_lineup_skills_exhausted():
+    # The user's only profiled skill is "dp", and every dp catalog problem is
+    # also a problem they've recently attempted -> zero eligible dp candidates
+    # for any slot. A separate skill ("geometry") they've never touched still
+    # has fresh candidates in the shared catalog. Regression for: a prolific
+    # user's own weak-skill pool being exhausted must not produce an empty
+    # queue when other real recommendations exist.
+    subs = []
+    for i in range(8):
+        subs += failed_episode(1000 + i * 10, 300 + i, days_ago=3 + i, tags=("dp",), rating=1400)
+    extra = catalog("geometry", 7000, count=4, rating_base=1200, rating_step=50)
+    build_world(subs, extra)  # no extra dp catalog: the dp pool is 100% recently-attempted
+    result = queue()
+    assert len(result["items"]) >= 2
+    assert "fallback_expanded_pool_used" in result["warnings"]
+    assert all(item["skill_id"] == "geometry" for item in result["items"])
+
+
+def test_no_profiles_warning_distinguishes_never_analyzed_from_empty_catalog():
+    # Never analyzed at all -> generic "run weakness analyze" hint.
+    never_analyzed = planner.build_daily_queue("totally-unseen-handle", queue_date=QUEUE_DATE)
+    assert never_analyzed["warnings"] == ["no_analysis_run_found_run_weakness_analyze_first"]
+
+    # Analysis *did* run for this handle, but the shared problem catalog / skill
+    # map was empty at the time, so it produced zero skill profiles. This is
+    # the exact bug behind "593 episodes but an empty queue": the old generic
+    # warning told users to re-run analysis when the real problem was an
+    # ops-side empty catalog. The warning must say something different.
+    subs = failed_episode(2000, 900, days_ago=5, tags=("dp",), rating=1400)
+    store.upsert_user({"handle": HANDLE, "rating": 1500})
+    store.upsert_submissions(HANDLE, subs)
+    store.save_problemset_snapshot({"problems": [], "problemStatistics": []})
+    taxonomy.build_problem_skill_map()  # no problems in the catalog -> map stays empty
+    episodes.rebuild_episodes(HANDLE)
+    weakness.analyze_handle_weakness(HANDLE)
+    profiles.build_profiles(HANDLE)
+
+    result = planner.build_daily_queue(HANDLE, queue_date=QUEUE_DATE)
+    assert result["items"] == []
+    assert result["warnings"] == ["analysis_found_but_no_skill_profiles_available_check_problem_catalog"]
+
+    plan = planner.build_plan(HANDLE, "7_day", start_date=QUEUE_DATE)
+    assert plan["days"] == []
+    assert plan["start_date"] == QUEUE_DATE  # regression: must never be omitted ("Starts undefined")
+    assert plan["warnings"] == ["analysis_found_but_no_skill_profiles_available_check_problem_catalog"]
+
+
 # ─── API contract ────────────────────────────────────────────────────────────
 
 

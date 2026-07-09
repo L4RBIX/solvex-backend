@@ -32,11 +32,17 @@ from typing import Any
 
 from contestiq_api.cfdata import profiles as profiles_mod
 from contestiq_api.cfdata import store
+from contestiq_api.cfdata import weakness
 from contestiq_api.versions import TAXONOMY_VERSION
 
 DAY_SECONDS = 86400
 RECENT_ATTEMPT_DAYS = 21
 HIGH_STRUGGLE = 0.5
+# Minimum items a daily queue should contain when the catalog/skill map has
+# any unused candidate at all — prevents prolific users (many episodes, most
+# of the near-target pool already solved/attempted) from seeing an empty
+# queue purely because their *preferred* skills ran out of candidates.
+MIN_QUEUE_FLOOR = 2
 
 MODE_OFFSETS = {
     "review_or_warmup": -150,
@@ -166,6 +172,20 @@ def _recent_struggle(profiles: dict[str, dict[str, Any]], skill_ids: list[str]) 
     return round(sum(parts) / len(parts), 3) if parts else 0.0
 
 
+def _no_profiles_warning(handle: str) -> str:
+    """Distinguish "this handle never ran weakness analysis" from "analysis ran
+    but produced zero skill profiles" (e.g. the global problem catalog / skill
+    map was empty or unmapped at analysis time). The two need different fixes —
+    the first needs the user to analyze, the second needs an ops/catalog fix —
+    so collapsing them into one message is misleading and was the direct cause
+    of premium users with real submission history seeing "sync more history
+    first" while an analysis run already existed.
+    """
+    if weakness.latest_run_id(handle) is None:
+        return "no_analysis_run_found_run_weakness_analyze_first"
+    return "analysis_found_but_no_skill_profiles_available_check_problem_catalog"
+
+
 def _prerequisite_ready(skill_id: str, profiles: dict[str, dict[str, Any]]) -> bool:
     if "." not in skill_id:
         return True
@@ -229,6 +249,8 @@ def _pick(
     skill_id: str,
     mode: str,
     target: int,
+    *,
+    ignore_diversity: bool = False,
 ) -> dict[str, Any] | None:
     pool = world["candidates_by_skill"].get(skill_id, [])
     if not pool:
@@ -245,7 +267,13 @@ def _pick(
             solve_age_days = (world["cutoff"] - world["solved"][pid]) / DAY_SECONDS
             if solve_age_days <= RECENT_ATTEMPT_DAYS:
                 return False
-        if state.violates(row, skill_id, mode):
+        # Last-resort fallback pass (see build_daily_queue): still never repeat
+        # the exact same problem, but skip the contest/top-level/leaf diversity
+        # caps so a prolific user with a near-exhausted pool for their assigned
+        # skills can still get a minimum floor of recommendations.
+        if pid in state.used_problems:
+            return False
+        if not ignore_diversity and state.violates(row, skill_id, mode):
             return False
         if window is not None:
             if row["rating"] is None:
@@ -361,6 +389,65 @@ def _slot_assignments(lineup: dict[str, Any], template: list[str], struggle: flo
     return assignments
 
 
+def _fill_queue_floor(
+    world: dict[str, Any],
+    state: SelectionState,
+    lineup: dict[str, Any],
+    struggle: float,
+    items: list[dict[str, Any]],
+    floor: int,
+) -> int:
+    """Last-resort top-up: if normal slot assignment (which targets specific
+    skills and enforces contest/top-level/leaf diversity) yields fewer than
+    `floor` items, widen the search to any mapped skill and ignore diversity
+    caps — but never relax the solved/recently-attempted/suppressed exclusions
+    and never repeat an already-picked problem. This only fires for the rare
+    case where the catalog and skill map exist but a heavy submission history
+    has exhausted the closest matches for the user's specific weak skills.
+    Returns the number of items added.
+    """
+    added = 0
+    if len(items) >= floor:
+        return added
+    ordered_skills = list(dict.fromkeys(lineup["any"] + sorted(world["candidates_by_skill"])))
+    # Repeat full passes over every mapped skill (not just one pick each) —
+    # each successful pick removes exactly one problem from its pool via
+    # state.used_problems, so a skill with several untouched candidates (e.g.
+    # a heavy user's one never-practiced tag) can fill the whole floor by
+    # itself. Stop once a full pass adds nothing, to guarantee termination.
+    progress = True
+    while len(items) < floor and progress:
+        progress = False
+        for skill_id in ordered_skills:
+            if len(items) >= floor:
+                break
+            profile = world["profiles"].get(skill_id)
+            target = _target_rating(profile, "transfer", struggle, 0)
+            picked = _pick(world, state, skill_id, "transfer", target, ignore_diversity=True)
+            if picked is None:
+                continue
+            state.commit(picked["problem"], skill_id)
+            items.append({
+                "item_id": str(uuid.uuid4()),
+                "slot": len(items) + 1,
+                "mode": "transfer",
+                "problem_id": picked["problem"]["problem_key"],
+                "problem_name": picked["problem"]["name"],
+                "skill_id": skill_id,
+                "target_rating": target,
+                "problem_rating": picked["problem"]["rating"],
+                "quality_score": picked["quality"],
+                "final_score": picked["score"],
+                "why_selected": _why(profile, skill_id, "transfer", target, picked, struggle)
+                + " Fallback pick: broadened beyond the usual variety limits because your"
+                " recent history had exhausted the closest matches.",
+                "item_status": "proposed",
+            })
+            added += 1
+            progress = True
+    return added
+
+
 def build_daily_queue(
     handle: str, queue_date: str | None = None, size: int = 4, force: bool = False
 ) -> dict[str, Any]:
@@ -376,7 +463,7 @@ def build_daily_queue(
     world = _load_world(canonical)
     if not world["profiles"]:
         return {"handle": canonical, "queue_date": queue_date, "items": [],
-                "warnings": ["no_analysis_run_found_run_weakness_analyze_first"], "reused": False}
+                "warnings": [_no_profiles_warning(canonical)], "reused": False}
 
     lineup = _skill_lineup(world["profiles"])
     struggle = _recent_struggle(world["profiles"], lineup["repair"][:3] or lineup["any"][:3])
@@ -407,6 +494,11 @@ def build_daily_queue(
             "why_selected": _why(profile, skill_id, mode, target, picked, struggle),
             "item_status": "proposed",
         })
+
+    if len(items) < MIN_QUEUE_FLOOR:
+        added = _fill_queue_floor(world, state, lineup, struggle, items, floor=MIN_QUEUE_FLOOR)
+        if added:
+            warnings.append("fallback_expanded_pool_used")
 
     if not items:
         warnings.append("insufficient_candidates")
@@ -476,8 +568,11 @@ def build_plan(handle: str, plan_type: str, start_date: str | None = None, force
 
     world = _load_world(canonical)
     if not world["profiles"]:
-        return {"handle": canonical, "plan_type": plan_type, "days": [],
-                "warnings": ["no_analysis_run_found_run_weakness_analyze_first"], "reused": False}
+        # start_date must always be present: the frontend renders
+        # `Starts ${plan.start_date}` unconditionally once a plan object comes
+        # back, so omitting it here previously rendered "Starts undefined".
+        return {"handle": canonical, "plan_type": plan_type, "start_date": start_date, "days": [],
+                "warnings": [_no_profiles_warning(canonical)], "reused": False}
 
     lineup = _skill_lineup(world["profiles"])
     struggle = _recent_struggle(world["profiles"], lineup["repair"][:3] or lineup["any"][:3])
