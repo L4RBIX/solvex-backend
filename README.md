@@ -104,6 +104,7 @@ Configuration is read from environment variables:
 - `CORS_ORIGINS`: comma-separated frontend origins; local dev origins are allowed by default.
 - `RATE_LIMIT_ANALYZE_SECONDS`: simple in-memory cooldown for `POST /api/analyze`; defaults to `0` in development and `30` in production.
 - `PORT`: optional hosting port.
+- `DATABASE_PATH`: SQLite path shared by backend jobs, users/entitlements, and the Codeforces problem catalog/skill map. On Railway this MUST point at a mounted persistent volume (e.g. `/data/backend_jobs.db`) or the catalog/skill map are wiped on every redeploy — see "Persistent Storage on Railway" in `docs/deployment.md`.
 
 See `.env.example`, `docs/deployment.md`, and `docs/model_limitations.md` for production-readiness and model-boundary notes.
 

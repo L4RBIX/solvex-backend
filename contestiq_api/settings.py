@@ -154,6 +154,18 @@ def validate_settings(settings: Settings) -> Settings:
     return settings
 
 
+def database_path_looks_persistent(database_path: str) -> bool:
+    """Best-effort signal for the admin storage-health check and startup log —
+    never used to change runtime behavior. Railway persistent volumes are
+    always mounted at an absolute path the operator chooses (e.g. /data); the
+    ephemeral default ("api_cache/backend_jobs.db") is relative to whatever
+    working directory the container happens to boot into. An absolute path
+    outside an actual mounted volume would still be ephemeral, so this is a
+    fast, honest hint, not a guarantee.
+    """
+    return Path(database_path).is_absolute()
+
+
 def get_settings() -> Settings:
     app_env = os.getenv("APP_ENV", "development").strip().lower() or "development"
     default_debug = app_env != "production"

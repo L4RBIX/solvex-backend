@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,13 +35,71 @@ from contestiq_api.routes import (
     weakness,
     workspace,
 )
-from contestiq_api.settings import get_settings
+from contestiq_api.settings import database_path_looks_persistent, get_settings
 
 settings = get_settings()
 logging.basicConfig(level=getattr(logging, settings.log_level, logging.INFO))
 logger = logging.getLogger("solvex.api")
 
-app = FastAPI(title="SolveX API", version=MODEL_VERSION)
+
+def _log_storage_diagnostics() -> dict[str, object]:
+    """Surface, on every boot, the exact signal for the "empty daily queue
+    despite many episodes" bug: an ephemeral DATABASE_PATH wiping the shared
+    problem catalog / skill map on redeploy. Cheap (two COUNT queries) and
+    never raises — a diagnostics failure must never block startup.
+    """
+    from contestiq_api.cfdata import store
+
+    diag = {"database_path": settings.database_path,
+            "database_path_looks_persistent": database_path_looks_persistent(settings.database_path)}
+    try:
+        diag.update(store.storage_diagnostics())
+    except Exception:
+        logger.exception("storage_diagnostics check failed at startup")
+        return diag
+    logger.info(json.dumps({"event": "storage_diagnostics", **diag}))
+    if diag.get("problemset_count") == 0 or diag.get("problem_skill_map_count") == 0:
+        logger.warning(
+            "Problem catalog or skill map is empty at startup — the daily queue and "
+            "training plans will return no candidates until POST /api/v1/sync/problemset "
+            "and POST /api/v1/skill-map/rebuild are run (see scripts/seed_production_catalog.py). "
+            "If this happens after every deploy, DATABASE_PATH is not pointed at a persistent "
+            "volume — see docs/deployment.md 'Persistent Storage on Railway'."
+        )
+    return diag
+
+
+async def _maybe_auto_seed_catalog(diag: dict[str, object]) -> None:
+    """Opt-in recovery only: enabled via FEATURE_FLAGS=auto_seed_catalog_on_startup.
+    Disabled by default, per design — this hits the live Codeforces API and can
+    take several seconds, so it must never run on every boring restart. Runs in
+    the background (never blocks startup/health checks) and only seeds when the
+    catalog is actually empty; a healthy persistent volume makes this a no-op.
+    """
+    if not settings.flag_enabled("auto_seed_catalog_on_startup"):
+        return
+    if diag.get("problemset_count") and diag.get("problem_skill_map_count"):
+        return
+    from contestiq_api.cfdata import sync as cf_sync
+    from contestiq_api.cfdata import taxonomy
+
+    logger.info("auto_seed_catalog_on_startup: catalog empty, seeding in the background...")
+    try:
+        await asyncio.to_thread(cf_sync.sync_problemset)
+        result = await asyncio.to_thread(taxonomy.build_problem_skill_map)
+        logger.info(json.dumps({"event": "auto_seed_catalog_complete", **result}))
+    except Exception:
+        logger.exception("auto_seed_catalog_on_startup failed")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    diag = _log_storage_diagnostics()
+    asyncio.create_task(_maybe_auto_seed_catalog(diag))
+    yield
+
+
+app = FastAPI(title="SolveX API", version=MODEL_VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

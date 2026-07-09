@@ -1042,6 +1042,24 @@ def problem_counts() -> dict[str, int]:
     return {"problems": problems, "statistics": stats}
 
 
+def storage_diagnostics() -> dict[str, Any]:
+    """Snapshot of the exact data a Railway redeploy silently wipes when
+    DATABASE_PATH is not pointed at a persistent volume: the shared problem
+    catalog and the derived problem_skill_map. Zero counts here (with an
+    otherwise-healthy process) are the signature of that bug — the daily
+    queue/plan endpoints will return no candidates until both are reseeded.
+    """
+    with connect() as conn:
+        problemset_count = conn.execute("SELECT COUNT(*) FROM problems").fetchone()[0]
+        skill_map_count = conn.execute("SELECT COUNT(*) FROM problem_skill_map").fetchone()[0]
+    snapshot = latest_problemset_snapshot()
+    return {
+        "problemset_count": problemset_count,
+        "problem_skill_map_count": skill_map_count,
+        "latest_problemset_sync_at": snapshot["fetched_at"] if snapshot else None,
+    }
+
+
 def get_problem(problem_key: str) -> dict[str, Any] | None:
     with connect() as conn:
         row = conn.execute("SELECT * FROM problems WHERE problem_key = ?", (problem_key,)).fetchone()

@@ -93,6 +93,31 @@ def user_billing(user_id: str, admin: dict[str, Any] = Depends(auth.require_admi
     return summary
 
 
+# ─── Storage / persistence ───────────────────────────────────────────────────
+
+
+@router.get("/storage-health")
+def storage_health(admin: dict[str, Any] = Depends(auth.require_admin)):
+    """Diagnose the exact failure mode behind "empty daily queue despite many
+    episodes" on Railway: an ephemeral SQLite DATABASE_PATH that gets wiped on
+    every redeploy, silently emptying the shared problem catalog and skill
+    map (which are not part of db/migrations — they're seeded data, not
+    schema). Call this right after a deploy; if `catalog_ready` is false, run
+    scripts/seed_production_catalog.py or POST /api/v1/sync/problemset then
+    POST /api/v1/skill-map/rebuild.
+    """
+    from contestiq_api.settings import database_path_looks_persistent, get_settings
+
+    settings = get_settings()
+    diag = store.storage_diagnostics()
+    return {
+        "database_path": settings.database_path,
+        "database_path_looks_persistent": database_path_looks_persistent(settings.database_path),
+        **diag,
+        "catalog_ready": diag["problemset_count"] > 0 and diag["problem_skill_map_count"] > 0,
+    }
+
+
 # ─── Jobs ────────────────────────────────────────────────────────────────────
 
 
