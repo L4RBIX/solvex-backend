@@ -23,6 +23,7 @@ from contestiq_api.routes import (
     episodes,
     execute,
     feedback,
+    gamification,
     health,
     recommendations,
     share,
@@ -121,3 +122,4 @@ app.include_router(workspace.router)
 app.include_router(feedback.router)
 app.include_router(copilot.router)
 app.include_router(coach.router)
+app.include_router(gamification.router)

@@ -404,6 +404,64 @@ pytest
 }
 ```
 
+## Product G1 Lightweight Gamification
+
+Phase G1 adds retention gamification derived entirely from Phase 10's
+`product_events` table — no new schema, no leaderboard, no duels, no
+matchmaking, no public profile, no social comparison.
+
+Only real learning actions are ever recorded as events, so gamification
+structurally cannot reward page visits, refreshes, or just opening a page:
+`first_analysis_completed`, `first_queue_generated`, `daily_queue_generated`,
+`feedback_submitted`, `weekly_report_generated`, `verification_attempted`,
+`premium_conversion`, `plan_started`.
+
+Endpoints:
+
+```bash
+curl "http://localhost:8000/api/v1/gamification/me?handle=tourist"
+curl "http://localhost:8000/api/v1/gamification/streak?handle=tourist"
+curl "http://localhost:8000/api/v1/gamification/daily-goal?handle=tourist"
+curl "http://localhost:8000/api/v1/gamification/badges?handle=tourist"
+```
+
+A bearer token also resolves a subject (merged with a linked handle's
+events when the account has one), so premium/verification actions
+(`user:<id>`) and handle-tracked actions (`handle:<handle>`) count toward the
+same learner. Callers with neither a handle nor a token get a harmless empty
+`"anonymous"` snapshot (200 OK) rather than an error.
+
+`POST /api/v1/gamification/recompute` is admin-only (`X-Admin-Key` or an
+admin user token) and simply replays a target subject's history on demand —
+there is no cache to invalidate, since every value is derived live.
+
+XP rules v1 (daily-capped per subject: 50 XP/day free, 150 XP/day premium,
+200 XP/day team/event/admin; within a day, each action *type* contributes
+its XP once no matter how many times it repeats):
+
+| Action | XP |
+| --- | --- |
+| `first_analysis_completed` | 20 |
+| `first_queue_generated` | 10 |
+| `daily_queue_generated` | 5 |
+| `feedback_submitted` | 5 |
+| `weekly_report_generated` | 20 |
+| `verification_attempted` | 25 |
+| `premium_conversion` | 50 |
+| `plan_started` | 15 |
+
+Levels follow deterministic increasing thresholds (`contestiq_api/gamification.py`
+documents and tests the formula): L1=0, L2=100, L3=250, L4=500, L5=900, and
+beyond.
+
+A streak day requires at least one meaningful event that UTC calendar day.
+The daily goal completes once 2 distinct training categories are hit in a
+day. Badges (`first_analysis`, `first_queue`, `feedback_loop`,
+`three_day_streak`, `seven_day_streak`, `first_weekly_report`,
+`first_verification_attempt`, `beta_premium`) are derived from the same
+event history, so they are naturally earned exactly once and never
+double-fire on recompute.
+
 ## Future Phases
 
 - FastAPI endpoints

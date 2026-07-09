@@ -51,6 +51,18 @@ def get_user(user_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def get_user_by_handle(handle: str) -> dict[str, Any] | None:
+    """Best-effort lookup used by gamification to merge a CF handle's public
+    events with any linked authenticated user's events (premium_conversion,
+    verification_attempted). Returns the most recently created match."""
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE LOWER(COALESCE(handle,'')) = ? ORDER BY created_at DESC LIMIT 1",
+            (store.canonical_handle(handle),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def search_users(query: str, limit: int = 20) -> list[dict[str, Any]]:
     like = f"%{query.strip().lower()}%"
     with store.connect() as conn:

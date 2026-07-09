@@ -49,9 +49,31 @@ def test_v1_health(tmp_path, monkeypatch):
     assert data["problem_catalog_version"]
 
 
+def _route_paths(client):
+    # Newer Starlette groups included routers behind `_IncludedRouter` wrapper
+    # objects (exposing `original_router` instead of `.path`); recurse through
+    # both `.routes` and `.original_router.routes` so this keeps working
+    # across Starlette versions.
+    def walk(routes):
+        paths = set()
+        for route in routes:
+            path = getattr(route, "path", None)
+            if path is not None:
+                paths.add(path)
+            sub_routes = getattr(route, "routes", None)
+            if sub_routes:
+                paths |= walk(sub_routes)
+            original_router = getattr(route, "original_router", None)
+            if original_router is not None:
+                paths |= walk(original_router.routes)
+        return paths
+
+    return walk(client.app.routes)
+
+
 def test_v1_route_paths_exist(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
-    paths = {route.path for route in client.app.routes}
+    paths = _route_paths(client)
     expected = {
         "/api/v1/health",
         "/api/v1/analysis/request",

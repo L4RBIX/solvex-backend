@@ -322,6 +322,7 @@ def record_feedback(item_id: str, feedback_type: str, comment: str | None = None
         "item_id": item_id,
         "problem_id": item["problem_id"],
         "feedback_type": feedback_type,
+        "handle": item["handle"],
     }
 
 

@@ -58,6 +58,13 @@ def daily_queue(payload: DailyQueueRequest, ctx: dict[str, Any] = Depends(entitl
         from contestiq_api import product_events
 
         product_events.track("first_queue_generated", f"handle:{handle.lower()}")
+        # Only a genuinely new queue counts as "generated today" for
+        # gamification — replaying an already-built queue (reused=True)
+        # must not let a page reload or repeated POST farm daily XP.
+        if not result.get("reused"):
+            product_events.track(
+                "daily_queue_generated", f"handle:{handle.lower()}", {"queue_date": result.get("queue_date")}
+            )
     return entitlements.shape_queue_response(_with_metadata(result), ctx)
 
 
@@ -93,6 +100,10 @@ def plan_14_day(payload: PlanRequest, ctx: dict[str, Any] = Depends(entitlements
     handle = validate_handle(payload.handle)
     profiles.build_profiles(handle)
     plan = planner.build_plan(handle, "14_day", start_date=payload.start_date, force=payload.force)
+    if plan.get("days"):
+        from contestiq_api import product_events
+
+        product_events.track("plan_started", f"handle:{handle.lower()}", {"plan_type": "14_day"})
     return entitlements.shape_plan_response(_with_metadata(plan), ctx)
 
 
@@ -136,5 +147,9 @@ def item_feedback(item_id: str, payload: FeedbackRequest, request: Request = Non
         raise APIError("ITEM_NOT_FOUND", f"No recommendation or plan item found with id {item_id}.", 404)
     from contestiq_api import product_events
 
-    product_events.track("feedback_submitted", f"item:{item_id}", {"feedback_type": payload.feedback_type})
+    # Tracked by handle (not item_id) so gamification/analytics can attribute
+    # this real learning action to the learner who gave the feedback.
+    handle = result.get("handle")
+    if handle:
+        product_events.track("feedback_submitted", f"handle:{handle.lower()}", {"item_id": item_id, "feedback_type": payload.feedback_type})
     return result

@@ -17,6 +17,7 @@ from contestiq_api.cfdata import store
 EVENT_TYPES = {
     "first_analysis_completed",
     "first_queue_generated",
+    "daily_queue_generated",
     "plan_started",
     "feedback_submitted",
     "weekly_report_generated",
@@ -53,5 +54,25 @@ def events_for(subject: str) -> list[dict[str, Any]]:
         rows = conn.execute(
             "SELECT event_type, properties, created_at FROM product_events WHERE subject = ? ORDER BY created_at",
             (subject,),
+        ).fetchall()
+    return [{**dict(row), "properties": json.loads(row["properties"])} for row in rows]
+
+
+def events_for_subjects(subjects: list[str]) -> list[dict[str, Any]]:
+    """Union of events for several subject aliases (e.g. `handle:x` and `user:y`
+    both belonging to the same learner), ordered chronologically.
+
+    Used by gamification (Phase G1) to replay a learner's full meaningful-action
+    history without introducing any new tables — product_events stays the
+    single source of truth.
+    """
+    if not subjects:
+        return []
+    placeholders = ", ".join("?" for _ in subjects)
+    with store.connect() as conn:
+        rows = conn.execute(
+            f"SELECT event_type, subject, properties, created_at FROM product_events"
+            f" WHERE subject IN ({placeholders}) ORDER BY created_at",
+            subjects,
         ).fetchall()
     return [{**dict(row), "properties": json.loads(row["properties"])} for row in rows]
