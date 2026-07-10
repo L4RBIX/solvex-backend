@@ -394,6 +394,14 @@ def test_api_contract(tmp_path, monkeypatch):
     client = TestClient(main.app, headers={"X-Admin-Key": "test-admin-key"})
     default_world()
 
+    owner = client.post("/api/v1/admin/users", json={}).json()
+    bound = client.post(
+        "/api/v1/admin/handles/bind",
+        json={"user_id": owner["user_id"], "handle": HANDLE},
+    )
+    assert bound.status_code == 200
+    owner_headers = {"Authorization": f"Bearer {owner['api_token']}"}
+
     created = client.post("/api/v1/recommendations/daily", json={"handle": HANDLE})
     assert created.status_code == 200
     data = created.json()
@@ -423,14 +431,54 @@ def test_api_contract(tmp_path, monkeypatch):
     assert fetched.json()["plan_id"] == plan_id
 
     item_id = data["items"][0]["item_id"]
-    fb = client.post(f"/api/v1/recommendations/{item_id}/feedback", json={"feedback_type": "good_problem"})
+    assert client.post(
+        f"/api/v1/recommendations/{item_id}/feedback", json={"feedback_type": "good_problem"}
+    ).status_code == 401
+
+    attacker = client.post("/api/v1/admin/users", json={}).json()
+    spoof = client.post(
+        f"/api/v1/recommendations/{item_id}/feedback",
+        json={"feedback_type": "good_problem"},
+        headers={"Authorization": f"Bearer {attacker['api_token']}"},
+    )
+    assert spoof.status_code == 403
+    with store.connect() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM recommendation_feedback WHERE item_id = ?", (item_id,)
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT item_status FROM recommendation_items WHERE item_id = ?", (item_id,)
+        ).fetchone()[0] == "proposed"
+
+    fb = client.post(
+        f"/api/v1/recommendations/{item_id}/feedback",
+        json={"feedback_type": "good_problem"},
+        headers=owner_headers,
+    )
     assert fb.status_code == 200
     assert fb.json()["status"] == "saved"
+    with store.connect() as conn:
+        event_subjects = [
+            row["subject"]
+            for row in conn.execute(
+                "SELECT subject FROM product_events WHERE event_type = 'feedback_submitted'"
+            ).fetchall()
+        ]
+    assert event_subjects == [f"user:{owner['user_id']}"]
+    assert f"handle:{HANDLE.lower()}" not in event_subjects
 
-    bad_type = client.post(f"/api/v1/recommendations/{item_id}/feedback", json={"feedback_type": "hated_it"})
+    bad_type = client.post(
+        f"/api/v1/recommendations/{item_id}/feedback",
+        json={"feedback_type": "hated_it"},
+        headers=owner_headers,
+    )
     assert bad_type.status_code == 422
 
-    missing = client.post("/api/v1/recommendations/no-such-item/feedback", json={"feedback_type": "skipped"})
+    missing = client.post(
+        "/api/v1/recommendations/no-such-item/feedback",
+        json={"feedback_type": "skipped"},
+        headers=owner_headers,
+    )
     assert missing.status_code == 404
 
     no_plan = client.get("/api/v1/plans/00000000-0000-0000-0000-000000000000")

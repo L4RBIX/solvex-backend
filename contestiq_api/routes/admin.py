@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from contestiq_api import auth, billing as billing_mod, entitlements
+from contestiq_api import auth, billing as billing_mod, entitlements, handles
 from contestiq_api.cfdata import store, sync as cf_sync, weakness
 from contestiq_api.errors import APIError
 from contestiq_api.versions import TAXONOMY_VERSION
@@ -36,6 +36,11 @@ class MarkProblemBadRequest(BaseModel):
     reason: str | None = None
 
 
+class BindHandleRequest(BaseModel):
+    user_id: str
+    handle: str = Field(min_length=3, max_length=24)
+
+
 class SkillMapEntry(BaseModel):
     skill_id: str
     weight: float = Field(gt=0, le=1)
@@ -60,6 +65,16 @@ def create_user(payload: CreateUserRequest, admin: dict[str, Any] = Depends(auth
 def search_users(query: str = Query(min_length=1, max_length=100), admin: dict[str, Any] = Depends(auth.require_admin)):
     auth.audit(admin["actor"], "search_users", None, {"query": query})
     return {"users": auth.search_users(query)}
+
+
+@router.post("/handles/bind")
+def bind_handle(payload: BindHandleRequest, admin: dict[str, Any] = Depends(auth.require_admin)):
+    """Audited reconciliation operation (security hotfix, req. 12): bind a CF
+    handle to a user_id WITHOUT the self-service verification flow. For
+    support cases, or explicitly re-attributing pre-fix historical
+    handle-tagged data after manual investigation — never automatic, and
+    always logged. Rejects if another user already verified this handle."""
+    return handles.admin_bind(payload.user_id, payload.handle, audit_actor=admin["actor"])
 
 
 @router.post("/users/{user_id}/grant-entitlement")
@@ -321,6 +336,9 @@ def refund_payment(payment_id: str, admin: dict[str, Any] = Depends(auth.require
 
 
 _USER_DATA_TABLES = [  # (table, user id column)
+    # Ownership references claims, so deletion must process this row first.
+    ("handle_owners", "user_id"),
+    ("handle_claims", "user_id"),
     ("entitlement_grants", "user_id"),
     ("payments", "user_id"),
     ("billing_customers", "user_id"),
@@ -345,6 +363,12 @@ def export_user_data(user_id: str, admin: dict[str, Any] = Depends(auth.require_
         for table, column in _USER_DATA_TABLES:
             rows = conn.execute(f"SELECT * FROM {table} WHERE {column} = ?", (user_id,)).fetchall()
             export[table] = [dict(row) for row in rows]
+            if table == "handle_claims":
+                # A pending verification code is a short-lived credential,
+                # not useful account-export data.  Preserve the row and its
+                # lifecycle metadata while never returning the code itself.
+                for claim in export[table]:
+                    claim["verification_code"] = "[REDACTED]"
         session_ids = [row["session_id"] for row in export.get("verification_sessions", [])]
         export["session_events_count"] = 0
         for session_id in session_ids:

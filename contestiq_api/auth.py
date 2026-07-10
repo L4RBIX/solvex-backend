@@ -86,6 +86,49 @@ def current_user(request: Request) -> dict[str, Any] | None:
     return user
 
 
+def require_user(request: Request) -> dict[str, Any]:
+    """Hard auth: a valid bearer token is mandatory (401 if missing/invalid).
+
+    Use this — never a caller-supplied `?handle=`/body handle/display_name —
+    to resolve identity for any protected SolveX account action (PvP duels,
+    private leaderboards, private gamification, weekly reports, feedback tied
+    to a user). A Codeforces handle is public data and must never be treated
+    as authentication.
+    """
+    user = current_user(request)
+    if user is None:
+        raise APIError("AUTH_REQUIRED", "Sign in is required for this action.", 401)
+    return user
+
+
+def require_user_subject(request: Request) -> dict[str, Any]:
+    """Authorization identity for protected actions.
+
+    ALWAYS derived from the validated bearer token — NEVER from a caller-
+    supplied handle/subject/user_id. `subject` (the authorization key for
+    duels/leaderboards, which key off `user_id` directly) is `user:<id>`
+    only. `aliases` additionally includes `handle:<verified>` when the
+    caller has a proven CF handle — this is used ONLY for gamification's
+    read-side event merge (public-analysis telemetry the same proven person
+    generated), never for authorizing a duel/leaderboard action.
+    """
+    user = require_user(request)
+    from contestiq_api import handles  # local import: handles.py imports errors/service, not auth — avoids a cycle
+
+    verified_handle = handles.verified_handle_for_user(user["user_id"])
+    subject = f"user:{user['user_id']}"
+    aliases = [subject]
+    if verified_handle:
+        aliases.append(f"handle:{verified_handle}")
+    return {
+        "user_id": user["user_id"],
+        "subject": subject,
+        "aliases": aliases,
+        "handle": verified_handle,
+        "handle_verified": verified_handle is not None,
+    }
+
+
 def require_admin(request: Request) -> dict[str, Any]:
     """Admin = role-admin user token, or the ADMIN_API_KEY bootstrap header."""
     settings = get_settings()

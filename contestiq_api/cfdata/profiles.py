@@ -235,6 +235,23 @@ def quality_scores(problem_ids: list[str]) -> dict[str, float]:
 # ─── Feedback ────────────────────────────────────────────────────────────────
 
 
+def feedback_item_handle(item_id: str) -> str | None:
+    """Return the public CF handle attached to a queue/plan item, without mutating it."""
+    with store.connect() as conn:
+        item = conn.execute(
+            "SELECT rr.handle FROM recommendation_items ri"
+            " JOIN recommendation_runs rr ON rr.run_id = ri.run_id WHERE ri.item_id = ?",
+            (item_id,),
+        ).fetchone()
+        if item is None:
+            item = conn.execute(
+                "SELECT tp.handle FROM training_plan_items tpi"
+                " JOIN training_plans tp ON tp.plan_id = tpi.plan_id WHERE tpi.item_id = ?",
+                (item_id,),
+            ).fetchone()
+    return item["handle"] if item else None
+
+
 def record_feedback(item_id: str, feedback_type: str, comment: str | None = None) -> dict[str, Any]:
     """Store feedback for a queue or plan item and apply its effects."""
     if feedback_type not in FEEDBACK_TYPES:

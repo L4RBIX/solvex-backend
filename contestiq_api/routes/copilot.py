@@ -14,6 +14,7 @@ import httpx
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field, field_validator
 
+from contestiq_api import auth
 from contestiq_api.coach_service import (
     detect_error_type as _coach_detect_error_type,
     format_profile_for_prompt,
@@ -566,6 +567,7 @@ async def _persist(
     user_msg: str,
     assistant_msg: str,
     model: str,
+    user_id: str | None,
 ) -> None:
     prob = req.effective_problem()
     editor = req.effective_editor()
@@ -577,6 +579,7 @@ async def _persist(
         "copilot_sessions",
         {
             "id": session_id,
+            "user_id": user_id,
             "problem_id": (prob.id if prob else None) or req.problem_key,
             "contest_id": prob.contest_id if prob else None,
             "problem_index": prob.index if prob else None,
@@ -592,6 +595,7 @@ async def _persist(
         [
             {
                 "session_id": session_id,
+                "user_id": user_id,
                 "role": "user",
                 "content": user_msg[:10_000],
                 "mode": req.mode,
@@ -601,6 +605,7 @@ async def _persist(
             },
             {
                 "session_id": session_id,
+                "user_id": user_id,
                 "role": "assistant",
                 "content": assistant_msg,
                 "mode": req.mode,
@@ -647,15 +652,17 @@ async def copilot_chat(req: CopilotRequest, request: Request) -> CopilotResponse
 
     session_id = req.session_id or str(uuid.uuid4())
     settings = get_settings()
+    user = auth.current_user(request)
+    memory_user_id = user["user_id"] if user else None
 
     # ── Load coach profile (best-effort, never blocks on failure) ─────────────
     profile: dict | None = None
-    if req.anonymous_user_key:
+    if memory_user_id:
         try:
             profile = await load_profile(
                 settings,
-                user_id=None,
-                anonymous_user_key=req.anonymous_user_key,
+                user_id=memory_user_id,
+                anonymous_user_key=None,
             )
         except Exception:
             pass
@@ -687,10 +694,11 @@ async def copilot_chat(req: CopilotRequest, request: Request) -> CopilotResponse
         user_msg=req.message,
         assistant_msg=assistant_content,
         model=model_used,
+        user_id=memory_user_id,
     )
 
     # ── Save solving event for coach memory (best-effort) ─────────────────────
-    if req.anonymous_user_key:
+    if memory_user_id:
         try:
             exec_ctx = req.effective_execution()
             editor = req.effective_editor()
@@ -702,7 +710,8 @@ async def copilot_chat(req: CopilotRequest, request: Request) -> CopilotResponse
             )
             event: dict = {
                 "id": str(uuid.uuid4()),
-                "anonymous_user_key": req.anonymous_user_key,
+                "user_id": memory_user_id,
+                "anonymous_user_key": None,
                 "session_id": session_id,
                 "problem_id": (prob.id if prob else None) or req.problem_key,
                 "contest_id": prob.contest_id if prob else None,

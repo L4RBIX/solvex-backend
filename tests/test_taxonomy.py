@@ -4,11 +4,14 @@ import pytest
 
 from contestiq_api.cfdata import store, taxonomy
 
+ADMIN_KEY = "taxonomy-admin-key"
+
 
 @pytest.fixture(autouse=True)
 def _isolated_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DATABASE_PATH", raising=False)
+    monkeypatch.setenv("ADMIN_API_KEY", ADMIN_KEY)
 
 
 def seed_problems(*problems):
@@ -171,13 +174,15 @@ def test_taxonomy_endpoints(tmp_path, monkeypatch):
     missing = client.get("/api/v1/taxonomy")
     assert missing.status_code == 404
 
-    seeded = client.post("/api/v1/taxonomy/seed")
+    assert client.post("/api/v1/taxonomy/seed").status_code == 403
+    seeded = client.post("/api/v1/taxonomy/seed", headers={"X-Admin-Key": ADMIN_KEY})
     assert seeded.json() == {"version": "taxonomy_v1", "skills": 52}
 
     data = client.get("/api/v1/taxonomy").json()
     assert len(data["skills"]) == 52
 
     seed_problems({"contestId": 1, "index": "A", "name": "P", "rating": 1400, "tags": ["dsu"]})
-    client.post("/api/v1/skill-map/rebuild")
+    assert client.post("/api/v1/skill-map/rebuild").status_code == 403
+    client.post("/api/v1/skill-map/rebuild", headers={"X-Admin-Key": ADMIN_KEY})
     skills = client.get("/api/v1/skill-map/1A").json()["skills"]
     assert skills[0]["skill_id"] == "graphs.dsu"

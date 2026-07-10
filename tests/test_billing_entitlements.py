@@ -208,7 +208,7 @@ def test_webhook_grants_and_is_idempotent(client):
         "payment_id": checkout["payment_id"],
         "external_payment_id": "ext-123",
     }
-    first = client.post("/api/v1/billing/webhook/local", json=event)
+    first = client.post("/api/v1/billing/webhook/local", json=event, headers=admin_headers())
     assert first.status_code == 200
     assert first.json()["status"] == "processed"
     assert first.json()["result"] == "granted:premium_student"
@@ -217,7 +217,7 @@ def test_webhook_grants_and_is_idempotent(client):
     assert me["plan"] == "premium_student"
 
     # Replay: no double processing, no duplicate entitlement.
-    second = client.post("/api/v1/billing/webhook/local", json=event)
+    second = client.post("/api/v1/billing/webhook/local", json=event, headers=admin_headers())
     assert second.json()["status"] == "already_processed"
     me = client.get("/api/v1/me/entitlements", headers=bearer(user)).json()
     assert len(me["grants"]) == 1
@@ -227,8 +227,40 @@ def test_webhook_grants_and_is_idempotent(client):
 
 
 def test_webhook_ignores_unknown_event_types(client):
-    response = client.post("/api/v1/billing/webhook/local", json={"event_id": "evt-x", "type": "customer.updated"})
+    response = client.post(
+        "/api/v1/billing/webhook/local",
+        json={"event_id": "evt-x", "type": "customer.updated"},
+        headers=admin_headers(),
+    )
     assert response.json()["result"].startswith("ignored_event_type")
+
+
+def test_webhook_cannot_self_grant_or_spoof_payment_identity(client):
+    attacker = create_user(client, handle="billing-attacker")
+    forged = {
+        "event_id": "evt-forged",
+        "type": "payment.completed",
+        "user_id": attacker["user_id"],
+        "plan": "premium_student",
+    }
+    assert client.post("/api/v1/billing/webhook/manual", json=forged).status_code == 403
+
+    admin_attempt = client.post(
+        "/api/v1/billing/webhook/manual", json=forged, headers=admin_headers()
+    )
+    assert admin_attempt.status_code == 200
+    assert admin_attempt.json()["result"] == "error:missing_payment_id"
+    me = client.get("/api/v1/me/entitlements", headers=bearer(attacker)).json()
+    assert me["plan"] == "free"
+
+
+def test_external_webhook_fails_closed_without_signature_verification(client):
+    response = client.post(
+        "/api/v1/billing/webhook/stripe",
+        json={"event_id": "evt-stripe", "type": "payment.completed"},
+    )
+    assert response.status_code == 501
+    assert response.json()["error_code"] == "WEBHOOK_VERIFICATION_UNAVAILABLE"
 
 
 def test_stripe_placeholder_fails_loudly_without_key(client):

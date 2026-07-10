@@ -5,12 +5,13 @@ current ISO week. Scores are computed live from product_events via the same
 gamification XP rules — no separate score table, no global leaderboard, no
 PvP duels, no public profiles.
 
-Authorization:
-- Only members can view a group's weekly standings.
-- Invite codes are stored hashed (sha256); the plaintext is returned exactly
-  once when created.
-- Creating a group requires an authenticated user OR an explicit handle
-  (anonymous beta learners tracked as handle:<cf handle>).
+Security: every function here takes a real `user_id` (from a validated
+bearer token — see auth.require_user_subject), NEVER a caller-supplied
+handle/subject/alias. Membership lookups are always `WHERE user_id = ?`.
+Invite codes are stored hashed (sha256); the plaintext is returned exactly
+once when created. A Codeforces handle is public data and carries no
+authorization weight — it is attached only for display/scoring convenience
+when the caller has a verified one (contestiq_api.handles).
 """
 
 from __future__ import annotations
@@ -21,10 +22,10 @@ import secrets
 import uuid
 from typing import Any
 
-from contestiq_api import auth, entitlements, gamification, product_events
+from contestiq_api import auth, entitlements, gamification, handles, product_events
 from contestiq_api.cfdata import store
 from contestiq_api.errors import APIError
-from contestiq_api.service import validate_handle
+from contestiq_api.identity import account_display_name
 
 INVITE_DAYS_DEFAULT = 30
 OWNER_ROLE = "owner"
@@ -35,67 +36,12 @@ def _hash_code(code: str) -> str:
     return hashlib.sha256(code.strip().encode("utf-8")).hexdigest()
 
 
-def _subject_aliases(member: dict[str, Any]) -> list[str]:
-    aliases = [member["member_subject"]]
-    if member.get("user_id"):
-        user_alias = f"user:{member['user_id']}"
-        if user_alias not in aliases:
-            aliases.append(user_alias)
-    if member.get("handle"):
-        handle_alias = f"handle:{store.canonical_handle(member['handle'])}"
-        if handle_alias not in aliases:
-            aliases.append(handle_alias)
-    return aliases
-
-
 def _plan_for_member(member: dict[str, Any]) -> str:
     if member.get("user_id"):
         user = auth.get_user(member["user_id"])
         if user is not None:
             return entitlements.effective_plan(user)
     return "free"
-
-
-def resolve_caller(
-    user: dict[str, Any] | None,
-    handle: str | None,
-) -> dict[str, Any]:
-    """Resolve caller identity into subject aliases for membership checks."""
-    aliases: list[str] = []
-    primary: str | None = None
-    cleaned_handle: str | None = None
-
-    if user is not None and user.get("user_id"):
-        user_alias = f"user:{user['user_id']}"
-        aliases.append(user_alias)
-        primary = user_alias
-
-    if handle:
-        cleaned_handle = validate_handle(handle)
-        alias = f"handle:{store.canonical_handle(cleaned_handle)}"
-        if alias not in aliases:
-            aliases.append(alias)
-        if primary is None:
-            primary = alias
-
-    if user is not None and user.get("user_id") and primary is None:
-        primary = f"user:{user['user_id']}"
-
-    if user is not None and primary is None and user.get("handle"):
-        handle_alias = f"handle:{store.canonical_handle(user['handle'])}"
-        if handle_alias not in aliases:
-            aliases.append(handle_alias)
-        primary = handle_alias
-
-    if not aliases:
-        raise APIError("AUTH_REQUIRED", "Provide a handle or API token to use leaderboards.", 401)
-
-    return {
-        "aliases": aliases,
-        "subject": primary,
-        "user_id": user.get("user_id") if user else None,
-        "handle": cleaned_handle or (user.get("handle") if user else None),
-    }
 
 
 def _public_group(row: dict[str, Any]) -> dict[str, Any]:
@@ -105,14 +51,13 @@ def _public_group(row: dict[str, Any]) -> dict[str, Any]:
         "visibility": row["visibility"],
         "active": bool(row["active"]),
         "created_at": row["created_at"],
-        "owner_subject": row["owner_subject"],
     }
 
 
 def create_group(
     caller: dict[str, Any],
     name: str,
-    display_name: str,
+    display_name: str | None = None,
 ) -> dict[str, Any]:
     leaderboard_id = str(uuid.uuid4())
     now = store._now()
@@ -121,9 +66,7 @@ def create_group(
     owner_handle = caller.get("handle")
     if owner_handle:
         owner_handle = store.canonical_handle(owner_handle)
-    elif owner_user_id:
-        user = auth.get_user(owner_user_id)
-        owner_handle = user.get("handle") if user else None
+    display_name = account_display_name(caller)
 
     with store.connect() as conn:
         conn.execute(
@@ -140,7 +83,7 @@ def create_group(
                 (leaderboard_id, member_subject, user_id, handle, display_name, member_role, joined_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (leaderboard_id, owner_subject, owner_user_id, owner_handle, display_name.strip(), OWNER_ROLE, now),
+            (leaderboard_id, owner_subject, owner_user_id, owner_handle, display_name, OWNER_ROLE, now),
         )
 
     invite = create_invite(leaderboard_id, created_by=owner_subject)
@@ -205,41 +148,38 @@ def get_member(leaderboard_id: str, member_subject: str) -> dict[str, Any] | Non
     return dict(row) if row else None
 
 
-def is_member(leaderboard_id: str, subject_aliases: list[str]) -> dict[str, Any] | None:
-    if not subject_aliases:
+def is_member(leaderboard_id: str, user_id: str) -> dict[str, Any] | None:
+    if not user_id:
         return None
-    placeholders = ", ".join("?" for _ in subject_aliases)
     with store.connect() as conn:
         row = conn.execute(
-            f"SELECT * FROM leaderboard_members WHERE leaderboard_id = ? AND member_subject IN ({placeholders})"
-            " ORDER BY joined_at ASC LIMIT 1",
-            (leaderboard_id, *subject_aliases),
+            "SELECT * FROM leaderboard_members WHERE leaderboard_id = ? AND user_id = ? ORDER BY joined_at ASC LIMIT 1",
+            (leaderboard_id, user_id),
         ).fetchone()
     return dict(row) if row else None
 
 
-def require_member(leaderboard_id: str, subject_aliases: list[str]) -> dict[str, Any]:
-    member = is_member(leaderboard_id, subject_aliases)
+def require_member(leaderboard_id: str, user_id: str) -> dict[str, Any]:
+    member = is_member(leaderboard_id, user_id)
     if member is None:
         raise APIError("FORBIDDEN", "You are not a member of this leaderboard.", 403)
     return member
 
 
-def list_groups_for_caller(subject_aliases: list[str]) -> list[dict[str, Any]]:
-    if not subject_aliases:
+def list_groups_for_caller(user_id: str) -> list[dict[str, Any]]:
+    if not user_id:
         return []
-    placeholders = ", ".join("?" for _ in subject_aliases)
     with store.connect() as conn:
         rows = conn.execute(
-            f"""
+            """
             SELECT g.leaderboard_id, g.name, g.visibility, g.active, g.created_at, g.owner_subject,
                    m.member_role, m.joined_at
             FROM leaderboard_groups g
             JOIN leaderboard_members m ON m.leaderboard_id = g.leaderboard_id
-            WHERE m.member_subject IN ({placeholders}) AND g.active = 1
+            WHERE m.user_id = ? AND g.active = 1
             ORDER BY g.created_at DESC
             """,
-            subject_aliases,
+            (user_id,),
         ).fetchall()
     return [
         {
@@ -257,7 +197,7 @@ def list_groups_for_caller(subject_aliases: list[str]) -> list[dict[str, Any]]:
 def join_group(
     caller: dict[str, Any],
     invite_code: str,
-    display_name: str,
+    display_name: str | None = None,
 ) -> dict[str, Any]:
     with store.connect() as conn:
         invite = conn.execute(
@@ -291,9 +231,7 @@ def join_group(
     handle = caller.get("handle")
     if handle:
         handle = store.canonical_handle(handle)
-    elif user_id:
-        user = auth.get_user(user_id)
-        handle = user.get("handle") if user else None
+    display_name = account_display_name(caller)
 
     now = store._now()
     with store.connect() as conn:
@@ -303,7 +241,7 @@ def join_group(
                 (leaderboard_id, member_subject, user_id, handle, display_name, member_role, joined_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (leaderboard_id, member_subject, user_id, handle, display_name.strip(), MEMBER_ROLE, now),
+            (leaderboard_id, member_subject, user_id, handle, display_name, MEMBER_ROLE, now),
         )
     return {
         "leaderboard_id": leaderboard_id,
@@ -314,16 +252,26 @@ def join_group(
 
 
 def _rank_entries(members: list[dict[str, Any]], week_start: dt.date) -> list[dict[str, Any]]:
+    """`user_id` is kept on each entry so the caller can robustly find the
+    viewer's own row (see weekly_standings) — it is always stripped before
+    any entry is returned over HTTP (never leak other members' user_ids)."""
     scored: list[dict[str, Any]] = []
     for member in members:
-        aliases = _subject_aliases(member)
-        events = product_events.events_for_subjects(aliases)
+        if member.get("user_id"):
+            events = product_events.events_for_account(member["user_id"])
+        else:
+            # Pre-fix handle-only membership cannot be safely attributed to
+            # any account. Preserve the row for audit/display, but freeze its
+            # score at zero: new anonymous public analysis events must not be
+            # able to change a private leaderboard. Explicitly rejoin with a
+            # bearer-token account after support reconciliation.
+            events = []
         plan = _plan_for_member(member)
         stats = gamification.compute_weekly_stats(events, plan, week_start)
         scored.append({
+            "user_id": member.get("user_id"),
             "display_name": member["display_name"],
             "handle": member.get("handle"),
-            "member_subject": member["member_subject"],
             "joined_at": member["joined_at"],
             "weekly_xp": stats["weekly_xp"],
             "level": stats["level"],
@@ -348,17 +296,20 @@ def _rank_entries(members: list[dict[str, Any]], week_start: dt.date) -> list[di
     )
     for rank, entry in enumerate(scored, start=1):
         entry["rank"] = rank
-        entry.pop("member_subject", None)
         entry.pop("joined_at", None)
     return scored
 
 
+def _strip_internal(entry: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in entry.items() if k != "user_id"}
+
+
 def weekly_standings(
     leaderboard_id: str,
-    viewer_aliases: list[str],
+    viewer_user_id: str,
     week_start: dt.date | None = None,
 ) -> dict[str, Any]:
-    require_member(leaderboard_id, viewer_aliases)
+    require_member(leaderboard_id, viewer_user_id)
     group = get_group(leaderboard_id)
     assert group is not None
 
@@ -373,24 +324,9 @@ def weekly_standings(
     members = [dict(row) for row in rows]
     entries = _rank_entries(members, start)
 
-    viewer_member = is_member(leaderboard_id, viewer_aliases)
-    viewer_rank = None
-    viewer_entry = None
-    if viewer_member is not None:
-        for entry in entries:
-            if entry["display_name"] == viewer_member["display_name"] and (
-                entry.get("handle") == viewer_member.get("handle")
-                or viewer_member.get("handle") is None
-            ):
-                viewer_rank = entry["rank"]
-                viewer_entry = entry
-                break
-        if viewer_rank is None:
-            for entry in entries:
-                if entry["display_name"] == viewer_member["display_name"]:
-                    viewer_rank = entry["rank"]
-                    viewer_entry = entry
-                    break
+    viewer_entry_internal = next((e for e in entries if e.get("user_id") == viewer_user_id), None)
+    viewer_rank = viewer_entry_internal["rank"] if viewer_entry_internal else None
+    viewer_entry = _strip_internal(viewer_entry_internal) if viewer_entry_internal else None
 
     return {
         "leaderboard_id": leaderboard_id,
@@ -399,15 +335,15 @@ def weekly_standings(
         "week_start": start.isoformat(),
         "viewer_rank": viewer_rank,
         "viewer_entry": viewer_entry,
-        "entries": entries,
+        "entries": [_strip_internal(e) for e in entries],
     }
 
 
 def viewer_weekly_me(
     leaderboard_id: str,
-    viewer_aliases: list[str],
+    viewer_user_id: str,
 ) -> dict[str, Any]:
-    standings = weekly_standings(leaderboard_id, viewer_aliases)
+    standings = weekly_standings(leaderboard_id, viewer_user_id)
     entry = standings.get("viewer_entry")
     if entry is None:
         raise APIError("VIEWER_NOT_RANKED", "No weekly activity found for you yet.", 404)

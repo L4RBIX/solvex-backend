@@ -162,24 +162,28 @@ def _apply_webhook_event(provider: str, event_type: str, payload: dict[str, Any]
     if event_type != "payment.completed":
         return f"ignored_event_type:{event_type}"
 
-    user_id = payload.get("user_id")
-    payment_id = payload.get("payment_id")
-    plan = payload.get("plan")
+    payment_id = str(payload.get("payment_id") or "").strip()
+    if not payment_id:
+        return "error:missing_payment_id"
     now = store._now()
 
     with store.connect() as conn:
-        if payment_id:
-            row = conn.execute("SELECT * FROM payments WHERE payment_id = ?", (payment_id,)).fetchone()
-            if row is not None:
-                user_id = user_id or row["user_id"]
-                plan = plan or row["plan"]
-                conn.execute(
-                    "UPDATE payments SET payment_status = 'completed', external_payment_id = ?, updated_at = ?"
-                    " WHERE payment_id = ?",
-                    (payload.get("external_payment_id"), now, payment_id),
-                )
-    if not user_id or not plan:
-        return "error:missing_user_or_plan"
+        row = conn.execute("SELECT * FROM payments WHERE payment_id = ?", (payment_id,)).fetchone()
+        if row is None:
+            return "error:unknown_payment"
+        if row["provider"] != provider:
+            return "error:provider_mismatch"
+        user_id = row["user_id"]
+        plan = row["plan"]
+        if row["payment_status"] == "completed":
+            return f"already_completed:{plan}"
+        if row["payment_status"] != "pending":
+            return f"error:payment_not_pending:{row['payment_status']}"
+        conn.execute(
+            "UPDATE payments SET payment_status = 'completed', external_payment_id = ?, updated_at = ?"
+            " WHERE payment_id = ?",
+            (payload.get("external_payment_id"), now, payment_id),
+        )
 
     expires = payload.get("expires_at")
     if not expires:

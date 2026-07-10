@@ -10,6 +10,12 @@ expected_output) pair from the FIRST submission in a duel is locked as the
 shared test for BOTH participants — a player cannot self-select their own
 expected output to win (see _lock_shared_test). Source code is hashed only —
 never returned.
+
+Security: every function here takes a real `user_id` (from a validated
+bearer token — see auth.require_user_subject), NEVER a caller-supplied
+handle/subject/alias. Participant lookups are always `WHERE user_id = ?`.
+A Codeforces handle is public data and is attached only for display/anchor-
+rating purposes when the caller has a verified one (contestiq_api.handles).
 """
 
 from __future__ import annotations
@@ -24,7 +30,7 @@ from typing import Any
 from contestiq_api import product_events
 from contestiq_api.cfdata import store
 from contestiq_api.errors import APIError
-from contestiq_api.leaderboards import resolve_caller
+from contestiq_api.identity import account_display_name
 
 MODES: dict[str, dict[str, Any]] = {
     "rapid_10": {"duration_minutes": 10, "rating_offset": 0, "rating_window": 200},
@@ -266,21 +272,19 @@ def get_participant(duel_id: str, subject: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def is_participant(duel_id: str, subject_aliases: list[str]) -> dict[str, Any] | None:
-    if not subject_aliases:
+def is_participant(duel_id: str, user_id: str) -> dict[str, Any] | None:
+    if not user_id:
         return None
-    placeholders = ", ".join("?" for _ in subject_aliases)
     with store.connect() as conn:
         row = conn.execute(
-            f"SELECT * FROM duel_participants WHERE duel_id = ? AND subject IN ({placeholders})"
-            " ORDER BY joined_at ASC LIMIT 1",
-            (duel_id, *subject_aliases),
+            "SELECT * FROM duel_participants WHERE duel_id = ? AND user_id = ? ORDER BY joined_at ASC LIMIT 1",
+            (duel_id, user_id),
         ).fetchone()
     return dict(row) if row else None
 
 
-def require_participant(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
-    member = is_participant(duel_id, subject_aliases)
+def require_participant(duel_id: str, user_id: str) -> dict[str, Any]:
+    member = is_participant(duel_id, user_id)
     if member is None:
         raise APIError("FORBIDDEN", "You are not a participant in this duel.", 403)
     return member
@@ -391,7 +395,7 @@ def create_duel(
     caller: dict[str, Any],
     *,
     mode: str,
-    display_name: str,
+    display_name: str | None = None,
 ) -> dict[str, Any]:
     if mode not in MODES:
         raise APIError("INVALID_MODE", "mode must be rapid_10 or classic_30.", 422)
@@ -405,6 +409,7 @@ def create_duel(
     handle = caller.get("handle")
     if handle:
         handle = store.canonical_handle(handle)
+    display_name = account_display_name(caller)
 
     with store.connect() as conn:
         conn.execute(
@@ -428,7 +433,7 @@ def create_duel(
             """,
             (
                 duel_id, caller["subject"], caller.get("user_id"), handle,
-                display_name.strip(), ROLE_CREATOR, now, FINAL_PENDING,
+                display_name, ROLE_CREATOR, now, FINAL_PENDING,
             ),
         )
 
@@ -472,7 +477,7 @@ def invite_preview(invite_code: str) -> dict[str, Any]:
     }
 
 
-def join_duel(caller: dict[str, Any], invite_code: str, display_name: str) -> dict[str, Any]:
+def join_duel(caller: dict[str, Any], invite_code: str, display_name: str | None = None) -> dict[str, Any]:
     with store.connect() as conn:
         row = conn.execute(
             "SELECT * FROM duel_matches WHERE invite_code_hash = ?",
@@ -484,7 +489,7 @@ def join_duel(caller: dict[str, Any], invite_code: str, display_name: str) -> di
     if duel["status"] != WAITING:
         raise APIError("DUEL_NOT_JOINABLE", "This duel cannot be joined right now.", 409)
 
-    existing = is_participant(duel["duel_id"], caller["aliases"])
+    existing = is_participant(duel["duel_id"], caller["user_id"])
     if existing is not None:
         return {"duel_id": duel["duel_id"], "status": duel["status"], "already_member": True, "role": existing["role"]}
 
@@ -495,6 +500,7 @@ def join_duel(caller: dict[str, Any], invite_code: str, display_name: str) -> di
     handle = caller.get("handle")
     if handle:
         handle = store.canonical_handle(handle)
+    display_name = account_display_name(caller)
     now = store._now()
     with store.connect() as conn:
         conn.execute(
@@ -505,7 +511,7 @@ def join_duel(caller: dict[str, Any], invite_code: str, display_name: str) -> di
             """,
             (
                 duel["duel_id"], caller["subject"], caller.get("user_id"), handle,
-                display_name.strip(), ROLE_CHALLENGER, now, FINAL_PENDING,
+                display_name, ROLE_CHALLENGER, now, FINAL_PENDING,
             ),
         )
 
@@ -538,15 +544,15 @@ def _activate(duel_id: str) -> None:
         product_events.track("duel_started", p["subject"], {"duel_id": duel_id})
 
 
-def mark_ready(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
+def mark_ready(duel_id: str, user_id: str) -> dict[str, Any]:
     """Mark the calling participant ready; auto-start when both are ready."""
-    participant = require_participant(duel_id, subject_aliases)
+    participant = require_participant(duel_id, user_id)
     duel = get_duel(duel_id)
     if duel is None:
         raise APIError("DUEL_NOT_FOUND", "Duel not found.", 404)
     duel = _maybe_expire(duel)
     if duel["status"] == ACTIVE:
-        return duel_state(duel_id, subject_aliases)
+        return duel_state(duel_id, user_id)
     if duel["status"] != WAITING:
         raise APIError("DUEL_NOT_READYABLE", "This duel is no longer waiting for players.", 409)
 
@@ -561,17 +567,17 @@ def mark_ready(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
     participants = list_participants(duel_id)
     if len(participants) >= 2 and all(p.get("ready_at") for p in participants):
         _activate(duel_id)
-    return duel_state(duel_id, subject_aliases)
+    return duel_state(duel_id, user_id)
 
 
-def start_duel(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
-    require_participant(duel_id, subject_aliases)
+def start_duel(duel_id: str, user_id: str) -> dict[str, Any]:
+    require_participant(duel_id, user_id)
     duel = get_duel(duel_id)
     if duel is None:
         raise APIError("DUEL_NOT_FOUND", "Duel not found.", 404)
     duel = _maybe_expire(duel)
     if duel["status"] == ACTIVE:
-        detail = public_detail(duel_id, subject_aliases)
+        detail = public_detail(duel_id, user_id)
         detail["arena_path"] = arena_path(duel_id)
         return detail
     if duel["status"] != WAITING:
@@ -584,14 +590,14 @@ def start_duel(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
         raise APIError("PLAYERS_NOT_READY", "Both players must be ready before the duel can start.", 409)
 
     _activate(duel_id)
-    detail = public_detail(duel_id, subject_aliases)
+    detail = public_detail(duel_id, user_id)
     detail["arena_path"] = arena_path(duel_id)
     return detail
 
 
-def open_arena(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
+def open_arena(duel_id: str, user_id: str) -> dict[str, Any]:
     """Telemetry: participant opened the duel Arena. Idempotent."""
-    participant = require_participant(duel_id, subject_aliases)
+    participant = require_participant(duel_id, user_id)
     now = store._now()
     with store.connect() as conn:
         conn.execute(
@@ -624,9 +630,9 @@ def _hint_texts(problem_public: dict[str, Any]) -> list[str]:
     ]
 
 
-def use_hint(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
+def use_hint(duel_id: str, user_id: str) -> dict[str, Any]:
     """Serve the participant's next safe hint and count it (winner v2 penalty)."""
-    participant = require_participant(duel_id, subject_aliases)
+    participant = require_participant(duel_id, user_id)
     duel = get_duel(duel_id)
     if duel is None:
         raise APIError("DUEL_NOT_FOUND", "Duel not found.", 404)
@@ -719,14 +725,14 @@ def _latest_judge_statuses(duel_id: str) -> dict[str, str]:
 
 async def submit_solution(
     duel_id: str,
-    subject_aliases: list[str],
+    user_id: str,
     *,
     language: str,
     source_code: str,
     stdin: str = "",
     expected_output: str | None = None,
 ) -> dict[str, Any]:
-    participant = require_participant(duel_id, subject_aliases)
+    participant = require_participant(duel_id, user_id)
     duel = get_duel(duel_id)
     if duel is None:
         raise APIError("DUEL_NOT_FOUND", "Duel not found.", 404)
@@ -832,26 +838,25 @@ async def submit_solution(
         "runtime_ms": result.get("time_ms"),
         "memory_kb": result.get("memory_kb"),
         "message": result.get("message") or result.get("status"),
-        "duel": public_detail(duel_id, subject_aliases),
+        "duel": public_detail(duel_id, user_id),
     }
 
 
-def list_duels_for_caller(subject_aliases: list[str]) -> list[dict[str, Any]]:
-    if not subject_aliases:
+def list_duels_for_caller(user_id: str) -> list[dict[str, Any]]:
+    if not user_id:
         return []
-    placeholders = ", ".join("?" for _ in subject_aliases)
     with store.connect() as conn:
         rows = conn.execute(
-            f"""
+            """
             SELECT d.duel_id, d.mode, d.status, d.problem_id, d.problem_rating, d.created_at,
                    d.expires_at, d.winner_subject, d.result_reason, p.role, p.display_name
             FROM duel_matches d
             JOIN duel_participants p ON p.duel_id = d.duel_id
-            WHERE p.subject IN ({placeholders})
+            WHERE p.user_id = ?
             ORDER BY d.created_at DESC
             LIMIT 50
             """,
-            subject_aliases,
+            (user_id,),
         ).fetchall()
     return [
         {
@@ -863,22 +868,21 @@ def list_duels_for_caller(subject_aliases: list[str]) -> list[dict[str, Any]]:
             "role": r["role"],
             "created_at": r["created_at"],
             "expires_at": r["expires_at"],
-            "winner_subject": r["winner_subject"],
             "result_reason": r["result_reason"],
         }
         for r in rows
     ]
 
 
-def public_detail(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
-    require_participant(duel_id, subject_aliases)
+def public_detail(duel_id: str, user_id: str) -> dict[str, Any]:
+    require_participant(duel_id, user_id)
     duel = get_duel(duel_id)
     if duel is None:
         raise APIError("DUEL_NOT_FOUND", "Duel not found.", 404)
     duel = _maybe_expire(duel)
     participants = list_participants(duel_id)
     problem = store.get_problem(duel["problem_id"])
-    viewer = is_participant(duel_id, subject_aliases)
+    viewer = is_participant(duel_id, user_id)
 
     with store.connect() as conn:
         sub_counts = {
@@ -901,12 +905,10 @@ def public_detail(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
         "expires_at": duel["expires_at"],
         "created_at": duel["created_at"],
         "completed_at": duel.get("completed_at"),
-        "winner_subject": duel.get("winner_subject"),
         "result_reason": duel.get("result_reason"),
         # Honest judging labels (hotfix): never claim official CF correctness.
         "judging_mode": JUDGING_MODE_CUSTOM,
         "test_locked": bool(duel.get("test_expected_output")),
-        "viewer_subject": viewer["subject"] if viewer else None,
         "viewer_role": viewer["role"] if viewer else None,
         "participants": [
             {
@@ -944,14 +946,14 @@ def _seconds_to_accept(duel: dict[str, Any], p: dict[str, Any]) -> float | None:
     return max(0.0, round((accepted - starts).total_seconds(), 1))
 
 
-def duel_state(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
+def duel_state(duel_id: str, user_id: str) -> dict[str, Any]:
     """Lightweight participant-only polling payload for the live room + Arena.
 
     Contains everything the room/Arena needs each 1–2s tick and nothing
     sensitive: no source code, no invite hash, no Judge0 config, no hidden
     tests (the catalog has none). Also bumps the viewer's last_seen_at.
     """
-    viewer = require_participant(duel_id, subject_aliases)
+    viewer = require_participant(duel_id, user_id)
     duel = get_duel(duel_id)
     if duel is None:
         raise APIError("DUEL_NOT_FOUND", "Duel not found.", 404)
@@ -1054,8 +1056,8 @@ def duel_state(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
     return state
 
 
-def result_view(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
-    detail = public_detail(duel_id, subject_aliases)
+def result_view(duel_id: str, user_id: str) -> dict[str, Any]:
+    detail = public_detail(duel_id, user_id)
     duel = get_duel(duel_id)
     assert duel is not None
     duel = _maybe_expire(duel)
@@ -1069,7 +1071,6 @@ def result_view(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
     return {
         "duel_id": duel_id,
         "status": duel["status"],
-        "winner_subject": duel.get("winner_subject"),
         "winner_display_name": winner["display_name"] if winner else None,
         "result_reason": duel.get("result_reason"),
         "completed_at": duel.get("completed_at"),

@@ -1,4 +1,9 @@
-"""Private weekly leaderboards (Phase G3) tests."""
+"""Private weekly leaderboards (Phase G3) tests.
+
+Security hotfix: membership is resolved exclusively from bearer tokens
+(never a caller-supplied handle) — see tests/test_identity_security.py for
+the dedicated spoofing/authorization regression suite.
+"""
 
 from __future__ import annotations
 
@@ -11,10 +16,9 @@ from fastapi.testclient import TestClient
 
 from contestiq_api import gamification, leaderboards, product_events
 from contestiq_api.cfdata import store
+from contestiq_api.identity import account_display_name
 
 ADMIN_KEY = "leaderboards-admin-key"
-HANDLE_A = "Lb-Owner"
-HANDLE_B = "Lb-Member"
 
 
 @pytest.fixture(autouse=True)
@@ -67,7 +71,7 @@ TODAY = dt.datetime.now(dt.timezone.utc).date()
 
 
 def test_create_leaderboard_with_token_owner_becomes_member(client):
-    user = make_user(client, handle=HANDLE_A)
+    user = make_user(client)
     response = client.post(
         "/api/v1/leaderboards",
         json={"name": "NIS CP Squad", "display_name": "Owner"},
@@ -80,26 +84,21 @@ def test_create_leaderboard_with_token_owner_becomes_member(client):
     assert "invite_code" in data
     assert len(data["invite_code"]) >= 8
 
-    member = leaderboards.is_member(data["leaderboard_id"], [f"user:{user['user_id']}"])
+    member = leaderboards.is_member(data["leaderboard_id"], user["user_id"])
     assert member is not None
     assert member["member_role"] == "owner"
-    assert member["display_name"] == "Owner"
+    assert member["display_name"] == account_display_name({"user_id": user["user_id"]})
 
 
-def test_create_leaderboard_with_handle_only(client):
+def test_create_leaderboard_requires_auth(client):
     response = client.post(
-        f"/api/v1/leaderboards?handle={HANDLE_A}",
-        json={"name": "Handle Squad", "display_name": "HandleOwner"},
+        "/api/v1/leaderboards", json={"name": "No Auth Squad", "display_name": "Ghost"}
     )
-    assert response.status_code == 200
-    data = response.json()
-    member = leaderboards.is_member(data["leaderboard_id"], [f"handle:{HANDLE_A.lower()}"])
-    assert member is not None
-    assert member["member_role"] == "owner"
+    assert response.status_code == 401
 
 
 def test_owner_can_create_invite(client):
-    user = make_user(client, handle=HANDLE_A)
+    user = make_user(client)
     created = client.post(
         "/api/v1/leaderboards",
         json={"name": "Invite Test", "display_name": "Owner"},
@@ -115,7 +114,7 @@ def test_owner_can_create_invite(client):
 
 
 def test_join_with_invite_code(client):
-    owner = make_user(client, handle=HANDLE_A)
+    owner = make_user(client)
     created = client.post(
         "/api/v1/leaderboards",
         json={"name": "Join Test", "display_name": "Owner"},
@@ -123,38 +122,37 @@ def test_join_with_invite_code(client):
     ).json()
     invite_code = created["invite_code"]
 
-    member = make_user(client, handle=HANDLE_B)
+    member = make_user(client)
     response = client.post(
         "/api/v1/leaderboards/join",
-        json={"invite_code": invite_code, "display_name": "Member Two", "handle": HANDLE_B},
+        json={"invite_code": invite_code, "display_name": "Member Two"},
         headers=bearer(member),
     )
     assert response.status_code == 200
     assert response.json()["already_member"] is False
-    assert leaderboards.is_member(created["leaderboard_id"], [f"user:{member['user_id']}"]) is not None
+    assert leaderboards.is_member(created["leaderboard_id"], member["user_id"]) is not None
 
 
-def test_join_with_handle_only(client):
-    owner = make_user(client, handle=HANDLE_A)
+def test_join_requires_auth(client):
+    owner = make_user(client)
     created = client.post(
         "/api/v1/leaderboards",
-        json={"name": "Handle Join", "display_name": "Owner"},
+        json={"name": "Auth Join", "display_name": "Owner"},
         headers=bearer(owner),
     ).json()
 
     response = client.post(
         "/api/v1/leaderboards/join",
-        json={"invite_code": created["invite_code"], "display_name": "Anon Friend", "handle": HANDLE_B},
+        json={"invite_code": created["invite_code"], "display_name": "Anon Friend"},
     )
-    assert response.status_code == 200
-    assert leaderboards.is_member(created["leaderboard_id"], [f"handle:{HANDLE_B.lower()}"]) is not None
+    assert response.status_code == 401
 
 
 def test_invalid_invite_rejected(client):
-    user = make_user(client, handle=HANDLE_A)
+    user = make_user(client)
     response = client.post(
         "/api/v1/leaderboards/join",
-        json={"invite_code": "totally-bogus-code", "display_name": "X", "handle": HANDLE_B},
+        json={"invite_code": "totally-bogus-code", "display_name": "X"},
         headers=bearer(user),
     )
     assert response.status_code == 404
@@ -165,14 +163,14 @@ def test_invalid_invite_rejected(client):
 
 
 def test_non_member_cannot_view_weekly(client):
-    owner = make_user(client, handle=HANDLE_A)
+    owner = make_user(client)
     created = client.post(
         "/api/v1/leaderboards",
         json={"name": "Private", "display_name": "Owner"},
         headers=bearer(owner),
     ).json()
 
-    outsider = make_user(client, handle=HANDLE_B)
+    outsider = make_user(client)
     response = client.get(
         f"/api/v1/leaderboards/{created['leaderboard_id']}/weekly",
         headers=bearer(outsider),
@@ -180,8 +178,19 @@ def test_non_member_cannot_view_weekly(client):
     assert response.status_code == 403
 
 
+def test_weekly_requires_auth(client):
+    owner = make_user(client)
+    created = client.post(
+        "/api/v1/leaderboards",
+        json={"name": "Auth Weekly", "display_name": "Owner"},
+        headers=bearer(owner),
+    ).json()
+    response = client.get(f"/api/v1/leaderboards/{created['leaderboard_id']}/weekly")
+    assert response.status_code == 401
+
+
 def test_member_can_view_weekly(client):
-    owner = make_user(client, handle=HANDLE_A)
+    owner = make_user(client)
     created = client.post(
         "/api/v1/leaderboards",
         json={"name": "Members Only", "display_name": "Owner"},
@@ -200,7 +209,7 @@ def test_member_can_view_weekly(client):
 
 
 def test_list_leaderboards_for_member_only(client):
-    owner = make_user(client, handle=HANDLE_A)
+    owner = make_user(client)
     created = client.post(
         "/api/v1/leaderboards",
         json={"name": "Listed", "display_name": "Owner"},
@@ -210,7 +219,7 @@ def test_list_leaderboards_for_member_only(client):
     listed = client.get("/api/v1/leaderboards", headers=bearer(owner)).json()
     assert any(g["leaderboard_id"] == created["leaderboard_id"] for g in listed["leaderboards"])
 
-    outsider = make_user(client, handle=HANDLE_B)
+    outsider = make_user(client)
     assert client.get("/api/v1/leaderboards", headers=bearer(outsider)).json()["leaderboards"] == []
 
 
@@ -218,8 +227,8 @@ def test_list_leaderboards_for_member_only(client):
 
 
 def test_weekly_ranking_from_product_events(client):
-    owner = make_user(client, handle=HANDLE_A, plan="premium_student")
-    member = make_user(client, handle=HANDLE_B)
+    owner = make_user(client, plan="premium_student")
+    member = make_user(client)
     created = client.post(
         "/api/v1/leaderboards",
         json={"name": "Rank Test", "display_name": "Owner"},
@@ -227,13 +236,13 @@ def test_weekly_ranking_from_product_events(client):
     ).json()
     client.post(
         "/api/v1/leaderboards/join",
-        json={"invite_code": created["invite_code"], "display_name": "Member", "handle": HANDLE_B},
+        json={"invite_code": created["invite_code"], "display_name": "Member"},
         headers=bearer(member),
     )
 
-    _insert_event("first_analysis_completed", f"handle:{HANDLE_A.lower()}", day=TODAY, hour=9)
-    _insert_event("daily_queue_generated", f"handle:{HANDLE_A.lower()}", day=TODAY, hour=10)
-    _insert_event("feedback_submitted", f"handle:{HANDLE_B.lower()}", day=TODAY, hour=9)
+    _insert_event("first_analysis_completed", f"user:{owner['user_id']}", day=TODAY, hour=9)
+    _insert_event("daily_queue_generated", f"user:{owner['user_id']}", day=TODAY, hour=10)
+    _insert_event("feedback_submitted", f"user:{member['user_id']}", day=TODAY, hour=9)
 
     weekly = client.get(
         f"/api/v1/leaderboards/{created['leaderboard_id']}/weekly",
@@ -245,7 +254,9 @@ def test_weekly_ranking_from_product_events(client):
     assert weekly["entries"][0]["active_days"] >= 1
 
 
-def test_ranking_tiebreakers_active_days_then_feedback(client):
+def test_legacy_handle_only_rows_do_not_score_public_events(client):
+    """Pre-fix rows have no authenticated account owner. Public handle
+    telemetry must not change their score inside a private leaderboard."""
     lb_id = str(uuid.uuid4())
     now = store._now()
     week_start = gamification.week_start_for(TODAY)
@@ -266,7 +277,7 @@ def test_ranking_tiebreakers_active_days_then_feedback(client):
             (lb_id, (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=5)).isoformat()),
         )
 
-    # Equal weekly XP (10) and active_days (2). Alpha wins on feedback tiebreaker.
+    # These public handle events are intentionally ignored for legacy rows.
     _insert_event("feedback_submitted", "handle:a", day=TODAY)
     _insert_event("daily_queue_generated", "handle:a", day=TODAY - dt.timedelta(days=1))
     _insert_event("daily_queue_generated", "handle:b", day=TODAY)
@@ -281,8 +292,9 @@ def test_ranking_tiebreakers_active_days_then_feedback(client):
         week_start,
     )
     assert entries[0]["display_name"] == "Alpha"
-    assert entries[0]["weekly_xp"] == entries[1]["weekly_xp"] == 10
-    assert entries[0]["feedback_count"] > entries[1]["feedback_count"]
+    assert entries[0]["weekly_xp"] == entries[1]["weekly_xp"] == 0
+    assert entries[0]["active_days"] == entries[1]["active_days"] == 0
+    assert entries[0]["feedback_count"] == entries[1]["feedback_count"] == 0
 
 
 def test_page_views_and_copilot_do_not_count(client):
@@ -306,7 +318,7 @@ def test_daily_xp_cap_respected_in_weekly_score():
 
 
 def test_weekly_response_has_no_secrets(client):
-    owner = make_user(client, handle=HANDLE_A, plan="premium_student")
+    owner = make_user(client, plan="premium_student")
     created = client.post(
         "/api/v1/leaderboards",
         json={"name": "Safe", "display_name": "Owner"},
@@ -320,14 +332,36 @@ def test_weekly_response_has_no_secrets(client):
     forbidden = [
         "api_token", "token_hash", "invite_code_hash", "password", "secret",
         "admin_api_key", "billing", "payment", "email", "properties",
-        "hidden_tests", "checker_ref",
+        "hidden_tests", "checker_ref", owner["api_token"].lower(),
     ]
     for word in forbidden:
         assert word not in raw, f"forbidden leak: {word}"
 
 
+def test_weekly_entries_never_include_other_members_user_id(client):
+    """The internal `user_id` field _rank_entries keeps for viewer-matching
+    must never reach the HTTP response — even for a peer member's entry."""
+    owner = make_user(client)
+    member = make_user(client)
+    created = client.post(
+        "/api/v1/leaderboards",
+        json={"name": "No Leak", "display_name": "Owner"},
+        headers=bearer(owner),
+    ).json()
+    client.post(
+        "/api/v1/leaderboards/join",
+        json={"invite_code": created["invite_code"], "display_name": "Member"},
+        headers=bearer(member),
+    )
+    weekly = client.get(
+        f"/api/v1/leaderboards/{created['leaderboard_id']}/weekly", headers=bearer(owner)
+    ).json()
+    for entry in weekly["entries"]:
+        assert "user_id" not in entry
+
+
 def test_invite_code_hash_not_stored_retrievable(client):
-    owner = make_user(client, handle=HANDLE_A)
+    owner = make_user(client)
     created = client.post(
         "/api/v1/leaderboards",
         json={"name": "Hash", "display_name": "Owner"},

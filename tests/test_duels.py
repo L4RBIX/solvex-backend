@@ -1,11 +1,16 @@
-"""Friend 1v1 duels (Phase G4) tests."""
+"""Friend 1v1 duels (Phase G4) tests.
+
+Security hotfix: duel identity is resolved EXCLUSIVELY from a bearer token
+(never a caller-supplied handle) — see tests/test_identity_security.py for
+the dedicated spoofing/authorization regression suite. These tests use real
+admin-issued accounts throughout.
+"""
 
 from __future__ import annotations
 
 import datetime as dt
 import hashlib
 import json
-import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -13,10 +18,9 @@ from fastapi.testclient import TestClient
 
 from contestiq_api import duels, gamification, product_events
 from contestiq_api.cfdata import store, taxonomy
+from contestiq_api.identity import account_display_name
 
 ADMIN_KEY = "duels-admin-key"
-HANDLE_A = "Duel-Creator"
-HANDLE_B = "Duel-Challenger"
 
 
 @pytest.fixture(autouse=True)
@@ -63,10 +67,15 @@ def bearer(user):
     return {"Authorization": f"Bearer {user['api_token']}"}
 
 
-def _create(client, handle=HANDLE_A, mode="rapid_10", display="Creator"):
+def _create(client, user, mode="rapid_10", display="Creator"):
+    return client.post("/api/v1/duels", json={"mode": mode, "display_name": display}, headers=bearer(user))
+
+
+def _join(client, user, invite_code, display="Challenger"):
     return client.post(
-        f"/api/v1/duels?handle={handle}",
-        json={"mode": mode, "display_name": display},
+        "/api/v1/duels/join",
+        json={"invite_code": invite_code, "display_name": display},
+        headers=bearer(user),
     )
 
 
@@ -74,7 +83,8 @@ def _create(client, handle=HANDLE_A, mode="rapid_10", display="Creator"):
 
 
 def test_create_duel_returns_invite_code_once(client, catalog):
-    response = _create(client)
+    user_a = make_user(client)
+    response = _create(client, user_a)
     assert response.status_code == 200
     data = response.json()
     assert "invite_code" in data
@@ -84,8 +94,14 @@ def test_create_duel_returns_invite_code_once(client, catalog):
     assert data["mode"] == "rapid_10"
 
 
+def test_create_duel_requires_auth(client, catalog):
+    response = client.post("/api/v1/duels", json={"mode": "rapid_10", "display_name": "Nobody"})
+    assert response.status_code == 401
+
+
 def test_invite_code_stored_hashed(client, catalog):
-    data = _create(client).json()
+    user_a = make_user(client)
+    data = _create(client, user_a).json()
     with store.connect() as conn:
         row = conn.execute("SELECT invite_code_hash FROM duel_matches").fetchone()
     assert row["invite_code_hash"] != data["invite_code"]
@@ -93,7 +109,8 @@ def test_invite_code_stored_hashed(client, catalog):
 
 
 def test_invite_preview_safe(client, catalog):
-    created = _create(client).json()
+    user_a = make_user(client)
+    created = _create(client, user_a).json()
     preview = client.get(f"/api/v1/duels/invite/{created['invite_code']}").json()
     assert preview["mode"] == "rapid_10"
     assert "creator_display_name" in preview
@@ -105,21 +122,27 @@ def test_invite_preview_safe(client, catalog):
 
 
 def test_join_with_valid_invite(client, catalog):
-    created = _create(client).json()
-    response = client.post(
-        "/api/v1/duels/join",
-        json={"invite_code": created["invite_code"], "display_name": "Challenger", "handle": HANDLE_B},
-    )
+    user_a = make_user(client)
+    user_b = make_user(client)
+    created = _create(client, user_a).json()
+    response = _join(client, user_b, created["invite_code"])
     assert response.status_code == 200
     assert response.json()["already_member"] is False
     assert response.json()["role"] == "challenger"
 
 
-def test_invalid_invite_rejected(client, catalog):
+def test_join_requires_auth(client, catalog):
+    user_a = make_user(client)
+    created = _create(client, user_a).json()
     response = client.post(
-        "/api/v1/duels/join",
-        json={"invite_code": "not-a-real-invite", "display_name": "X", "handle": HANDLE_B},
+        "/api/v1/duels/join", json={"invite_code": created["invite_code"], "display_name": "Ghost"}
     )
+    assert response.status_code == 401
+
+
+def test_invalid_invite_rejected(client, catalog):
+    user_b = make_user(client)
+    response = _join(client, user_b, "not-a-real-invite")
     assert response.status_code == 404
     assert response.json()["error_code"] == "INVITE_INVALID"
 
@@ -128,28 +151,30 @@ def test_invalid_invite_rejected(client, catalog):
 
 
 def test_non_participant_cannot_view_duel(client, catalog):
-    created = _create(client).json()
-    response = client.get(f"/api/v1/duels/{created['duel_id']}?handle={HANDLE_B}")
+    user_a = make_user(client)
+    user_stranger = make_user(client)
+    created = _create(client, user_a).json()
+    response = client.get(f"/api/v1/duels/{created['duel_id']}", headers=bearer(user_stranger))
     assert response.status_code == 403
 
 
 def test_participant_can_view_duel(client, catalog):
-    created = _create(client).json()
-    response = client.get(f"/api/v1/duels/{created['duel_id']}?handle={HANDLE_A}")
+    user_a = make_user(client)
+    created = _create(client, user_a).json()
+    response = client.get(f"/api/v1/duels/{created['duel_id']}", headers=bearer(user_a))
     assert response.status_code == 200
     assert response.json()["duel_id"] == created["duel_id"]
     assert len(response.json()["participants"]) == 1
 
 
 def test_duel_starts_with_two_participants(client, catalog):
-    created = _create(client).json()
-    client.post(
-        "/api/v1/duels/join",
-        json={"invite_code": created["invite_code"], "display_name": "Challenger", "handle": HANDLE_B},
-    )
-    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_A}")
-    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_B}")
-    response = client.post(f"/api/v1/duels/{created['duel_id']}/start?handle={HANDLE_A}")
+    user_a = make_user(client)
+    user_b = make_user(client)
+    created = _create(client, user_a).json()
+    _join(client, user_b, created["invite_code"])
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready", headers=bearer(user_a))
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready", headers=bearer(user_b))
+    response = client.post(f"/api/v1/duels/{created['duel_id']}/start", headers=bearer(user_a))
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "active"
@@ -158,7 +183,8 @@ def test_duel_starts_with_two_participants(client, catalog):
 
 
 def test_problem_assigned_from_catalog(client, catalog):
-    created = _create(client).json()
+    user_a = make_user(client)
+    created = _create(client, user_a).json()
     problem_id = created["problem"]["problem_id"]
     assert store.get_problem(problem_id) is not None
     assert created["problem"]["rating"] is not None
@@ -174,21 +200,20 @@ def _skip_countdown(duel_id):
         conn.execute("UPDATE duel_matches SET starts_at = ? WHERE duel_id = ?", (past, duel_id))
 
 
-def _seed_active_duel(client):
-    created = _create(client).json()
-    client.post(
-        "/api/v1/duels/join",
-        json={"invite_code": created["invite_code"], "display_name": "Challenger", "handle": HANDLE_B},
-    )
-    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_A}")
-    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_B}")
-    client.post(f"/api/v1/duels/{created['duel_id']}/start?handle={HANDLE_A}")
+def _seed_active_duel(client, user_a, user_b):
+    created = _create(client, user_a).json()
+    _join(client, user_b, created["invite_code"])
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready", headers=bearer(user_a))
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready", headers=bearer(user_b))
+    client.post(f"/api/v1/duels/{created['duel_id']}/start", headers=bearer(user_a))
     _skip_countdown(created["duel_id"])
     return created
 
 
 def test_accepted_submission_wins(client, catalog):
-    created = _seed_active_duel(client)
+    user_a = make_user(client)
+    user_b = make_user(client)
+    created = _seed_active_duel(client, user_a, user_b)
     mock_result = {
         "status": "accepted", "passed": True, "stdout": "ok", "stderr": "",
         "compile_output": "", "time_ms": 10, "memory_kb": 100, "message": "accepted",
@@ -199,8 +224,9 @@ def test_accepted_submission_wins(client, catalog):
             gs.return_value.judge0_api_key = ""
             gs.return_value.judge0_api_host = ""
             response = client.post(
-                f"/api/v1/duels/{created['duel_id']}/submit?handle={HANDLE_A}",
+                f"/api/v1/duels/{created['duel_id']}/submit",
                 json={"language": "python3", "source_code": "print(1)", "stdin": "", "expected_output": "1"},
+                headers=bearer(user_a),
             )
     assert response.status_code == 200
     body = response.json()
@@ -209,43 +235,49 @@ def test_accepted_submission_wins(client, catalog):
     assert body["duel"]["result_reason"] == "first_custom_test_pass"
     winners = [p for p in body["duel"]["participants"] if p["is_winner"]]
     assert len(winners) == 1
-    assert winners[0]["handle"] == HANDLE_A.lower()
+    assert winners[0]["display_name"] == account_display_name({"user_id": user_a["user_id"]})
 
 
 def test_earlier_accepted_submission_wins_tie(client, catalog):
-    created = _seed_active_duel(client)
+    user_a = make_user(client)
+    user_b = make_user(client)
+    created = _seed_active_duel(client, user_a, user_b)
     duel_id = created["duel_id"]
     now = store._now()
     earlier = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=5)).isoformat()
     later = now
     with store.connect() as conn:
         conn.execute(
-            "UPDATE duel_participants SET accepted_at = ?, final_status = 'accepted' WHERE duel_id = ? AND handle = ?",
-            (earlier, duel_id, HANDLE_B.lower()),
+            "UPDATE duel_participants SET accepted_at = ?, final_status = 'accepted' WHERE duel_id = ? AND user_id = ?",
+            (earlier, duel_id, user_b["user_id"]),
         )
         conn.execute(
-            "UPDATE duel_participants SET accepted_at = ?, final_status = 'accepted' WHERE duel_id = ? AND handle = ?",
-            (later, duel_id, HANDLE_A.lower()),
+            "UPDATE duel_participants SET accepted_at = ?, final_status = 'accepted' WHERE duel_id = ? AND user_id = ?",
+            (later, duel_id, user_a["user_id"]),
         )
     duels._finalize_duel(duel_id, at_timeout=False)
     duel = duels.get_duel(duel_id)
     assert duel["status"] == "completed"
-    assert duel["winner_subject"] == f"handle:{HANDLE_B.lower()}"
+    assert duel["winner_subject"] == f"user:{user_b['user_id']}"
 
 
 def test_no_accepted_submissions_expires_draws(client, catalog):
-    created = _seed_active_duel(client)
+    user_a = make_user(client)
+    user_b = make_user(client)
+    created = _seed_active_duel(client, user_a, user_b)
     past = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1)).isoformat()
     with store.connect() as conn:
         conn.execute("UPDATE duel_matches SET expires_at = ? WHERE duel_id = ?", (past, created["duel_id"]))
-    detail = client.get(f"/api/v1/duels/{created['duel_id']}?handle={HANDLE_A}").json()
+    detail = client.get(f"/api/v1/duels/{created['duel_id']}", headers=bearer(user_a)).json()
     assert detail["status"] == "expired"
-    assert detail["winner_subject"] is None
+    assert "winner_subject" not in detail
     assert detail["result_reason"] == "expired_draw"
 
 
 def test_source_code_secrets_not_exposed(client, catalog):
-    created = _seed_active_duel(client)
+    user_a = make_user(client)
+    user_b = make_user(client)
+    created = _seed_active_duel(client, user_a, user_b)
     mock_result = {
         "status": "wrong_answer", "passed": False, "stdout": "x", "stderr": "",
         "compile_output": "", "time_ms": 1, "memory_kb": 1, "message": "wa",
@@ -256,14 +288,16 @@ def test_source_code_secrets_not_exposed(client, catalog):
             gs.return_value.judge0_api_key = "secret-key"
             gs.return_value.judge0_api_host = ""
             client.post(
-                f"/api/v1/duels/{created['duel_id']}/submit?handle={HANDLE_A}",
+                f"/api/v1/duels/{created['duel_id']}/submit",
                 json={"language": "python3", "source_code": "SECRET_SOURCE_CODE_XYZ", "stdin": "", "expected_output": "1"},
+                headers=bearer(user_a),
             )
-    detail = client.get(f"/api/v1/duels/{created['duel_id']}?handle={HANDLE_A}").json()
+    detail = client.get(f"/api/v1/duels/{created['duel_id']}", headers=bearer(user_a)).json()
     raw = json.dumps(detail)
     assert "SECRET_SOURCE_CODE_XYZ" not in raw
     assert "secret-key" not in raw
     assert "source_code" not in raw.lower()
+    assert user_a["api_token"] not in raw
     preview = client.get(f"/api/v1/duels/invite/{created['invite_code']}")
     # invite may be closed after start — either 410 or safe preview
     if preview.status_code == 200:
@@ -274,20 +308,21 @@ def test_source_code_secrets_not_exposed(client, catalog):
 
 
 def test_product_events_emitted_for_completed_duel_only(client, catalog):
-    created = _create(client).json()
-    events = product_events.events_for(f"handle:{HANDLE_A.lower()}")
+    user_a = make_user(client)
+    user_b = make_user(client)
+    subject_a = f"user:{user_a['user_id']}"
+    subject_b = f"user:{user_b['user_id']}"
+    created = _create(client, user_a).json()
+    events = product_events.events_for(subject_a)
     assert any(e["event_type"] == "duel_created" for e in events)
     # Creating alone must not emit duel_completed / duel_won.
     assert not any(e["event_type"] == "duel_completed" for e in events)
     assert not any(e["event_type"] == "duel_won" for e in events)
 
-    client.post(
-        "/api/v1/duels/join",
-        json={"invite_code": created["invite_code"], "display_name": "Challenger", "handle": HANDLE_B},
-    )
-    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_A}")
-    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_B}")
-    client.post(f"/api/v1/duels/{created['duel_id']}/start?handle={HANDLE_A}")
+    _join(client, user_b, created["invite_code"])
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready", headers=bearer(user_a))
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready", headers=bearer(user_b))
+    client.post(f"/api/v1/duels/{created['duel_id']}/start", headers=bearer(user_a))
     _skip_countdown(created["duel_id"])
     mock_result = {
         "status": "accepted", "passed": True, "stdout": "1", "stderr": "",
@@ -299,12 +334,13 @@ def test_product_events_emitted_for_completed_duel_only(client, catalog):
             gs.return_value.judge0_api_key = ""
             gs.return_value.judge0_api_host = ""
             client.post(
-                f"/api/v1/duels/{created['duel_id']}/submit?handle={HANDLE_A}",
+                f"/api/v1/duels/{created['duel_id']}/submit",
                 json={"language": "python3", "source_code": "print(1)", "expected_output": "1"},
+                headers=bearer(user_a),
             )
 
-    creator_events = {e["event_type"] for e in product_events.events_for(f"handle:{HANDLE_A.lower()}")}
-    challenger_events = {e["event_type"] for e in product_events.events_for(f"handle:{HANDLE_B.lower()}")}
+    creator_events = {e["event_type"] for e in product_events.events_for(subject_a)}
+    challenger_events = {e["event_type"] for e in product_events.events_for(subject_b)}
     assert "duel_completed" in creator_events
     assert "duel_won" in creator_events
     assert "duel_completed" in challenger_events
@@ -312,12 +348,12 @@ def test_product_events_emitted_for_completed_duel_only(client, catalog):
 
 
 def test_xp_not_farmable_from_abandoned_duels(client, catalog):
-    before = gamification.compute_xp_total(
-        product_events.events_for(f"handle:{HANDLE_A.lower()}"), daily_cap=1000
-    )
+    user_a = make_user(client)
+    subject_a = f"user:{user_a['user_id']}"
+    before = gamification.compute_xp_total(product_events.events_for(subject_a), daily_cap=1000)
     for _ in range(3):
-        _create(client)
-    after_events = product_events.events_for(f"handle:{HANDLE_A.lower()}")
+        _create(client, user_a)
+    after_events = product_events.events_for(subject_a)
     after = gamification.compute_xp_total(after_events, daily_cap=1000)
     # duel_created is tracked but awards 0 XP (not in XP_RULES meaningful awards beyond completed/won).
     assert after == before

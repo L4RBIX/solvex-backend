@@ -3,6 +3,8 @@ import json
 
 from fastapi.testclient import TestClient
 
+ADMIN_KEY = "feedback-analytics-admin-key"
+
 
 def _write_jsonl(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -118,6 +120,7 @@ def test_low_sample_size_prevents_strong_flags(tmp_path, monkeypatch):
 
 def test_feedback_summary_api_endpoint(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ADMIN_API_KEY", ADMIN_KEY)
     import contestiq_api.storage as storage
     import contestiq_api.feedback_analytics as analytics
     import contestiq_api.main as main
@@ -130,13 +133,14 @@ def test_feedback_summary_api_endpoint(tmp_path, monkeypatch):
         [{"analysis_id": "a1", "handle": "h", "slot_type": "repair", "anchor_skill": "graphs", "feedback": "good_fit"}],
     )
     client = TestClient(main.app)
-    response = client.get("/api/feedback/summary")
+    response = client.get("/api/feedback/summary", headers={"X-Admin-Key": ADMIN_KEY})
     assert response.status_code == 200
     assert response.json()["status"] == "available"
 
 
 def test_feedback_summary_markdown_endpoint(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ADMIN_API_KEY", ADMIN_KEY)
     import contestiq_api.storage as storage
     import contestiq_api.feedback_analytics as analytics
     import contestiq_api.main as main
@@ -145,6 +149,6 @@ def test_feedback_summary_markdown_endpoint(tmp_path, monkeypatch):
     importlib.reload(analytics)
     importlib.reload(main)
     client = TestClient(main.app)
-    response = client.get("/api/feedback/summary.md")
+    response = client.get("/api/feedback/summary.md", headers={"X-Admin-Key": ADMIN_KEY})
     assert response.status_code == 200
     assert "ContestIQ Feedback Analytics" in response.text

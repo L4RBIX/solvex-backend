@@ -14,7 +14,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from contestiq_api import gamification, product_events
+from contestiq_api import gamification, handles, product_events
 from contestiq_api.cfdata import store
 
 ADMIN_KEY = "gamification-admin-key"
@@ -299,10 +299,21 @@ def test_all_v1_badges_defined_and_absent_without_qualifying_events():
 
 
 # ─── HTTP contract ────────────────────────────────────────────────────────
+#
+# Security hotfix: /gamification/me (and its siblings) now require a bearer
+# token and ALWAYS return the authenticated caller's own data — a
+# caller-supplied `?handle=` no longer has any effect on identity. See
+# tests/test_identity_security.py for the dedicated spoofing suite.
+
+
+def test_gamification_me_requires_auth(client):
+    response = client.get("/api/v1/gamification/me")
+    assert response.status_code == 401
 
 
 def test_gamification_me_response_contract(client):
-    response = client.get(f"/api/v1/gamification/me?handle={HANDLE}")
+    user = make_user(client)
+    response = client.get("/api/v1/gamification/me", headers=bearer(user))
     assert response.status_code == 200
     data = response.json()
     assert set(data.keys()) == {
@@ -311,7 +322,7 @@ def test_gamification_me_response_contract(client):
         # G2 additive fields
         "recent_xp_events", "daily_quests", "weekly_quests", "milestones",
     }
-    assert data["subject"] == f"handle:{HANDLE.lower()}"
+    assert data["subject"] == f"user:{user['user_id']}"
     assert data["plan"] == "free"
     assert data["xp_total"] == 0
     assert data["level"] == 1
@@ -321,23 +332,8 @@ def test_gamification_me_response_contract(client):
     assert data["badges"] == []
 
 
-def test_gamification_me_anonymous_free_subject_works(client):
-    response = client.get(f"/api/v1/gamification/me?handle={HANDLE}")
-    assert response.status_code == 200
-    assert response.json()["plan"] == "free"
-
-
-def test_gamification_me_without_handle_or_token_returns_empty_snapshot(client):
-    response = client.get("/api/v1/gamification/me")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["subject"] == "anonymous"
-    assert data["xp_total"] == 0
-    assert data["badges"] == []
-
-
 def test_gamification_me_token_premium_subject_works(client):
-    user = make_user(client, handle=HANDLE, plan="premium_student")
+    user = make_user(client, plan="premium_student")
     response = client.get("/api/v1/gamification/me", headers=bearer(user))
     assert response.status_code == 200
     data = response.json()
@@ -345,23 +341,40 @@ def test_gamification_me_token_premium_subject_works(client):
     assert data["subject"] == f"user:{user['user_id']}"
 
 
-def test_gamification_merges_handle_and_linked_user_events(client):
-    user = make_user(client, handle=HANDLE, plan="premium_student")  # premium_conversion tracked as user:<id>
-    client.post(
-        f"/api/v1/weakness/{HANDLE}/analyze", headers=admin()
-    )  # first_analysis_completed tracked as handle:<handle>
+def test_gamification_merges_verified_handle_events_automatically(client):
+    """Once a user VERIFIES a handle (handle_owners), their public-analysis
+    telemetry under that handle merges into their private snapshot with no
+    query param involved — the merge is driven by verified ownership, never
+    by a caller-supplied `?handle=`."""
+    user = make_user(client, plan="premium_student")  # premium_conversion tracked as user:<id>
+    client.post(f"/api/v1/weakness/{HANDLE}/analyze", headers=admin())  # first_analysis_completed as handle:<handle>
+    handles.admin_bind(user["user_id"], HANDLE)  # audited reconciliation — proves ownership for this test
 
-    response = client.get(f"/api/v1/gamification/me?handle={HANDLE}", headers=bearer(user))
+    response = client.get("/api/v1/gamification/me", headers=bearer(user))
     assert response.status_code == 200
     data = response.json()
     badge_ids = {b["id"] for b in data["badges"]}
     assert "beta_premium" in badge_ids  # from the user:<id> alias
-    assert "first_analysis" in badge_ids  # from the handle:<handle> alias
+    assert "first_analysis" in badge_ids  # from the verified handle:<handle> alias
     assert data["plan"] == "premium_student"
 
 
+def test_gamification_does_not_merge_unverified_handle(client):
+    """Without verification, an authenticated user's snapshot must NOT pick
+    up another (or even their own claimed-but-unverified) handle's events."""
+    user = make_user(client)
+    client.post(f"/api/v1/weakness/{HANDLE}/analyze", headers=admin())  # unrelated handle's public telemetry
+
+    response = client.get("/api/v1/gamification/me", headers=bearer(user))
+    data = response.json()
+    badge_ids = {b["id"] for b in data["badges"]}
+    assert "first_analysis" not in badge_ids
+    assert data["xp_total"] == 0
+
+
 def test_gamification_streak_endpoint_shape(client):
-    response = client.get(f"/api/v1/gamification/streak?handle={HANDLE}")
+    user = make_user(client)
+    response = client.get("/api/v1/gamification/streak", headers=bearer(user))
     assert response.status_code == 200
     data = response.json()
     assert set(data.keys()) == {"subject", "streak"}
@@ -369,7 +382,8 @@ def test_gamification_streak_endpoint_shape(client):
 
 
 def test_gamification_daily_goal_endpoint_shape(client):
-    response = client.get(f"/api/v1/gamification/daily-goal?handle={HANDLE}")
+    user = make_user(client)
+    response = client.get("/api/v1/gamification/daily-goal", headers=bearer(user))
     assert response.status_code == 200
     data = response.json()
     assert set(data.keys()) == {"subject", "daily_goal"}
@@ -377,7 +391,8 @@ def test_gamification_daily_goal_endpoint_shape(client):
 
 
 def test_gamification_badges_endpoint_shape(client):
-    response = client.get(f"/api/v1/gamification/badges?handle={HANDLE}")
+    user = make_user(client)
+    response = client.get("/api/v1/gamification/badges", headers=bearer(user))
     assert response.status_code == 200
     data = response.json()
     assert set(data.keys()) == {"subject", "badges"}
@@ -397,23 +412,16 @@ def test_gamification_recompute_requires_a_target(client):
 
 
 def test_gamification_response_has_no_secrets_admin_or_payment_data(client):
-    user = make_user(client, handle=HANDLE, plan="premium_student")
-    response = client.get(f"/api/v1/gamification/me?handle={HANDLE}", headers=bearer(user))
+    user = make_user(client, plan="premium_student")
+    response = client.get("/api/v1/gamification/me", headers=bearer(user))
     raw = json.dumps(response.json()).lower()
     forbidden = [
         "api_token", "token_hash", "password", "secret", "admin_api_key",
         "billing_api_key", "webhook", "payment", "card", "email",
-        "hidden_tests", "checker_ref", "source_code",
+        "hidden_tests", "checker_ref", "source_code", user["api_token"].lower(),
     ]
     for word in forbidden:
         assert word not in raw, f"forbidden field/word leaked into gamification response: {word}"
-
-
-def test_gamification_api_failure_mode_is_graceful_for_invalid_handle(client):
-    # Too-short handle fails the same validate_handle() every other v1 endpoint
-    # uses — the important behavior is a clean 4xx, not a 500 or a crash.
-    response = client.get("/api/v1/gamification/me?handle=a")
-    assert response.status_code in (400, 422)
 
 
 # ─── Integration with real endpoints (events fire correctly) ────────────────

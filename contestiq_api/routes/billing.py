@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from contestiq_api import billing as billing_mod
 from contestiq_api import entitlements
+from contestiq_api import auth
 from contestiq_api.auth import current_user
 from contestiq_api.errors import APIError
 
@@ -46,6 +47,21 @@ async def billing_webhook(provider: str, request: Request):
     from contestiq_api.throttle import throttle
 
     throttle(request, "billing_webhook")
+    if provider not in billing_mod.PROVIDERS:
+        raise APIError("UNKNOWN_PROVIDER", f"Unknown billing provider: {provider}", 422)
+    if provider in {"manual", "local"}:
+        # These providers have no third-party signature. They are operational
+        # confirmation endpoints, so only a SolveX admin may invoke them.
+        auth.require_admin(request)
+    else:
+        # Do not accept an external payment assertion until that provider's
+        # signature verification is implemented. A configured secret alone
+        # is not verification.
+        raise APIError(
+            "WEBHOOK_VERIFICATION_UNAVAILABLE",
+            f"Signed {provider} webhooks are not implemented.",
+            501,
+        )
     payload = await request.json()
     if not isinstance(payload, dict):
         raise APIError("INVALID_WEBHOOK", "Webhook payload must be a JSON object.", 422)

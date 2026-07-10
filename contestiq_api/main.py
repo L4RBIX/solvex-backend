@@ -18,6 +18,7 @@ from contestiq_api.errors import APIError
 from contestiq_api.routes import (
     admin,
     analysis,
+    auth_routes,
     b2b,
     billing,
     coach,
@@ -168,6 +169,7 @@ async def api_error_handler(request: Request, exc: APIError):
 
 
 app.include_router(health.router)
+app.include_router(auth_routes.router)
 app.include_router(v1.router)
 app.include_router(sync.router)
 app.include_router(episodes.router)

@@ -347,7 +347,8 @@ def test_milestones_streak_target_moves_to_seven_after_three():
 
 
 def test_me_includes_g2_fields_and_stays_backward_compatible(client):
-    response = client.get(f"/api/v1/gamification/me?handle={HANDLE}")
+    user = make_user(client)
+    response = client.get("/api/v1/gamification/me", headers=bearer(user))
     assert response.status_code == 200
     data = response.json()
     # G1 fields untouched.
@@ -361,15 +362,23 @@ def test_me_includes_g2_fields_and_stays_backward_compatible(client):
     assert data["milestones"][0]["id"] == "next_level"
 
 
+def test_gamification_g2_endpoints_require_auth(client):
+    assert client.get("/api/v1/gamification/me").status_code == 401
+    assert client.get("/api/v1/gamification/activity").status_code == 401
+    assert client.get("/api/v1/gamification/quests").status_code == 401
+
+
 def test_activity_endpoint_shape(client):
-    response = client.get(f"/api/v1/gamification/activity?handle={HANDLE}")
+    user = make_user(client)
+    response = client.get("/api/v1/gamification/activity", headers=bearer(user))
     assert response.status_code == 200
     data = response.json()
     assert set(data.keys()) == {"subject", "recent_xp_events"}
 
 
 def test_quests_endpoint_shape(client):
-    response = client.get(f"/api/v1/gamification/quests?handle={HANDLE}")
+    user = make_user(client)
+    response = client.get("/api/v1/gamification/quests", headers=bearer(user))
     assert response.status_code == 200
     data = response.json()
     assert set(data.keys()) == {"subject", "daily_quests", "weekly_quests", "milestones"}
@@ -396,7 +405,7 @@ def test_premium_token_user_gets_g2_fields(client):
 
 def test_invalid_token_does_not_crash_g2_response(client):
     response = client.get(
-        f"/api/v1/gamification/me?handle={HANDLE}",
+        "/api/v1/gamification/me",
         headers={"Authorization": "Bearer not-a-real-token"},
     )
     # Current auth behavior must remain unchanged: invalid bearer tokens return
@@ -408,12 +417,13 @@ def test_invalid_token_does_not_crash_g2_response(client):
 
 def test_g2_response_has_no_secrets_admin_or_payment_data(client):
     user = make_user(client, handle=HANDLE, plan="premium_student")
-    response = client.get(f"/api/v1/gamification/me?handle={HANDLE}", headers=bearer(user))
+    response = client.get("/api/v1/gamification/me", headers=bearer(user))
     raw = json.dumps(response.json()).lower()
     forbidden = [
         "api_token", "token_hash", "password", "secret", "admin_api_key",
         "billing_api_key", "webhook", "payment", "card", "email",
         "hidden_tests", "checker_ref", "source_code", "properties",
+        user["api_token"].lower(),
     ]
     for word in forbidden:
         assert word not in raw, f"forbidden field/word leaked into G2 gamification response: {word}"

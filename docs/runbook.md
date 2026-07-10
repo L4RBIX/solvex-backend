@@ -4,9 +4,12 @@
 
 FastAPI backend (`contestiq_api.main:app`) — single source of truth for
 analysis, recommendations, billing/entitlements, SkillTrace verification, and
-B2B (teams/events). Local persistence: SQLite (`DATABASE_PATH`); production:
-Postgres/Supabase via `db/migrations/*.sql` (apply in numeric order; never
-edit an applied migration — add a new one).
+B2B (teams/events). The current Railway production service uses persistent
+SQLite at `DATABASE_PATH=/data/backend_jobs.db` on its mounted volume. The
+additive SQLite schema mirror lives in `contestiq_api/cfdata/store.py`.
+`db/migrations/*.sql` keeps PostgreSQL/RLS schema parity for a future or
+alternate PostgreSQL deployment; apply those files in numeric order and never
+edit an applied migration.
 
 ## Startup
 
@@ -85,11 +88,15 @@ tokens (delete row in `users` → user re-issued by admin), Judge0/DeepSeek keys
 
 ## Deploy / migration procedure
 
-1. CI green (lint, migration check, secret scan, 300+ tests).
-2. Apply new `db/migrations/NNN_*.sql` to Postgres in order (Supabase SQL editor
-   or psql). Migrations are additive; RLS must stay enabled on every table.
-3. Deploy backend; watch `/api/v1/health` and 5xx rate for 10 minutes.
-4. Frontend (Vercel) needs `NEXT_PUBLIC_API_URL` pointing at the backend.
+1. CI green (lint, migration check, secret scan, full backend tests).
+2. For the current Railway SQLite deployment, confirm the additive SQLite
+   mirror passes `scripts/check_migrations.py`; startup creates missing tables
+   in the existing persistent database. Do not change `DATABASE_PATH` or the
+   mounted volume as part of a schema release.
+3. If deploying the PostgreSQL variant, apply the new
+   `db/migrations/NNN_*.sql` in order. RLS must stay enabled on every table.
+4. Deploy backend; watch `/api/v1/health` and the 5xx rate for 10 minutes.
+5. Frontend (Vercel) needs `NEXT_PUBLIC_API_URL` pointing at the backend.
 
 ## Load characteristics
 
@@ -99,12 +106,18 @@ cached reads ~260 rps on SQLite, callback storms replay-safe). Re-run:
 
 ## Known unresolved risks
 
-- Legacy `/api/*` routes (analyze, workspace, share, copilot, coach) predate
-  auth: anonymous, handle-based, public-CF-data only. Fold behind v1 auth or
-  deprecate before broad launch.
-- Recommendation feedback is anonymous (no handle ownership): throttled, but a
-  motivated abuser with item ids could skew one handle's frustration scores.
-  Real fix = handle claiming/linking (planned Phase 10).
+- Legacy public analysis and public share reads remain anonymous by design.
+  Weekly reports, feedback mutations, Coach memory, and the shared support
+  workspace now require bearer/ownership or admin authorization. Public
+  Copilot chat remains available, but private memory is loaded and written
+  only for the bearer-token account.
+- Verified-handle reconciliation includes public telemetry created before the
+  verification timestamp. Post-verification public-handle events are excluded
+  from private XP/leaderboard computation; owned actions are recorded under
+  `user:<id>`. Pre-verification telemetry cannot prove who clicked the public
+  endpoint, so disputed history still requires explicit support review.
+- There is no automatic verified-handle transfer/unbind. See
+  `docs/identity_reconciliation.md` for the audited reconciliation limits.
 - Per-handle sync lock is in-process; multi-instance deploys need a DB lock
   (active-job check gives partial protection).
 - `pip-audit` step is report-only until dependency pins are reviewed.

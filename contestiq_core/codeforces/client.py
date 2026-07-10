@@ -28,8 +28,13 @@ def _cache_path(endpoint: str, params: dict[str, Any] | None) -> Path:
 
 def _request(endpoint: str, params: dict[str, Any] | None = None, use_cache: bool = True) -> Any:
     global _last_request_at
-    path = _cache_path(endpoint, params)
-    if use_cache and path.exists():
+    # Ownership verification must be a genuinely live read.  In particular,
+    # disabling the cache means *neither* consulting nor refreshing the public
+    # disk cache: writing the one-time profile value here could let a later,
+    # ordinary cached read observe verification material after the user has
+    # removed it from Codeforces.
+    path = _cache_path(endpoint, params) if use_cache else None
+    if path is not None and path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
 
     url = f"{CODEFORCES_API_BASE}/{endpoint}"
@@ -86,7 +91,8 @@ def _request(endpoint: str, params: dict[str, Any] | None = None, use_cache: boo
             continue
 
         result = payload["result"]
-        path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        if path is not None:
+            path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         return result
 
     raise CodeforcesAPIError(f"Codeforces request failed for {endpoint}")
@@ -104,8 +110,11 @@ def fetch_user_rating(handle: str) -> list[dict[str, Any]]:
     return _request("user.rating", {"handle": handle})
 
 
-def fetch_user_info(handle: str) -> dict[str, Any]:
-    result = _request("user.info", {"handles": handle})
+def fetch_user_info(handle: str, use_cache: bool = True) -> dict[str, Any]:
+    """`use_cache=False` forces a live fetch — required for handle-ownership
+    verification, where a stale cached profile would let a claim pass on a
+    since-changed field, or fail on a just-edited one."""
+    result = _request("user.info", {"handles": handle}, use_cache=use_cache)
     if not result:
         raise CodeforcesAPIError(f"Codeforces handle not found: {handle}")
     return result[0]

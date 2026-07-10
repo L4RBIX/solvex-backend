@@ -170,8 +170,10 @@ def test_execute_endpoint_throttled(client, monkeypatch):
 def test_webhook_throttled(client, monkeypatch):
     monkeypatch.setitem(throttle.DAILY_LIMITS, "billing_webhook", 2)
     for i in range(2):
-        client.post("/api/v1/billing/webhook/local", json={"event_id": f"e{i}", "type": "noop"})
-    blocked = client.post("/api/v1/billing/webhook/local", json={"event_id": "e9", "type": "noop"})
+        client.post("/api/v1/billing/webhook/local", json={"event_id": f"e{i}", "type": "noop"},
+                    headers={"X-Admin-Key": ADMIN_KEY})
+    blocked = client.post("/api/v1/billing/webhook/local", json={"event_id": "e9", "type": "noop"},
+                          headers={"X-Admin-Key": ADMIN_KEY})
     assert blocked.status_code == 429
 
 

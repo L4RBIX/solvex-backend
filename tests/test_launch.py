@@ -7,7 +7,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from contestiq_api import product_events
+from contestiq_api import handles, product_events
 from contestiq_api.cfdata import episodes, store, taxonomy, weakness
 from contestiq_api.skilltrace import judge0 as j0
 
@@ -104,6 +104,9 @@ def build_world(extra_solves=0):
 def test_first_paid_user_end_to_end_without_code_changes(client):
     build_world()
     user = make_user(client, handle=HANDLE)
+    # Weekly report is SolveX-account data (security hotfix): the caller must
+    # be the VERIFIED owner of the handle, not merely have it set on file.
+    handles.admin_bind(user["user_id"], HANDLE)
 
     # 1) Free: blocked from premium features.
     assert client.post("/api/v1/plans/14-day", json={"handle": HANDLE},
@@ -118,7 +121,7 @@ def test_first_paid_user_end_to_end_without_code_changes(client):
     # 3) Payment confirmation via webhook activates the entitlement.
     hook = client.post("/api/v1/billing/webhook/manual",
                        json={"event_id": "launch-evt-1", "type": "payment.completed",
-                             "payment_id": checkout["payment_id"]})
+                             "payment_id": checkout["payment_id"]}, headers=admin())
     assert hook.json()["result"] == "granted:premium_student"
 
     # 4) Premium features now work end-to-end.
@@ -176,7 +179,13 @@ def test_onboarding_events_fire_and_first_events_are_once(client):
     today = client.post("/api/v1/recommendations/daily",
                         json={"handle": HANDLE, "queue_date": "2026-07-07"}, headers=admin()).json()
     item_id = today["items"][0]["item_id"]
-    client.post(f"/api/v1/recommendations/{item_id}/feedback", json={"feedback_type": "good_problem"})
+    feedback_user = make_user(client)
+    handles.admin_bind(feedback_user["user_id"], HANDLE)
+    client.post(
+        f"/api/v1/recommendations/{item_id}/feedback",
+        json={"feedback_type": "good_problem"},
+        headers=bearer(feedback_user),
+    )
     assert product_events.count("feedback_submitted") == 1
 
     user = make_user(client, handle=HANDLE, plan="premium_student")
@@ -218,10 +227,22 @@ def test_weekly_report_batch_job_and_premium_gate(client):
     result = client.post("/api/v1/admin/jobs/weekly-reports", headers=admin()).json()
     assert result["reports_generated"] == 1
 
+    # Security hotfix: auth is required before anything else — an
+    # unauthenticated caller never even reaches the premium-plan check.
     anonymous = client.get(f"/api/v1/weekly-report/{HANDLE}")
-    assert anonymous.status_code == 402  # premium feature
+    assert anonymous.status_code == 401
+
+    # A different handle for the free-plan check — handle_owners allows only
+    # one verified owner per handle, and HANDLE is bound to `premium` below.
+    free_owner = make_user(client, handle="Launch-User-Free")
+    handles.admin_bind(free_owner["user_id"], "Launch-User-Free")
+    gated = client.get("/api/v1/weekly-report/Launch-User-Free", headers=bearer(free_owner))
+    assert gated.status_code == 402  # premium feature, verified owner but free plan
 
     premium = make_user(client, plan="premium_student")
+    unverified = client.get(f"/api/v1/weekly-report/{HANDLE}", headers=bearer(premium))
+    assert unverified.status_code == 403  # premium plan but NOT the verified owner of this handle
+    handles.admin_bind(premium["user_id"], HANDLE)
     response = client.get(f"/api/v1/weekly-report/{HANDLE}", headers=bearer(premium))
     assert response.status_code == 200
     assert response.json()["handle"] == HANDLE.lower()
@@ -230,6 +251,7 @@ def test_weekly_report_batch_job_and_premium_gate(client):
 def test_weekly_report_first_baseline(client):
     build_world()  # single analysis run
     premium = make_user(client, plan="premium_student")
+    handles.admin_bind(premium["user_id"], HANDLE)
     report = client.get(f"/api/v1/weekly-report/{HANDLE}", headers=bearer(premium)).json()
     assert report["status"] == "first_report_baseline"
 

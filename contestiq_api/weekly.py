@@ -44,7 +44,12 @@ def _runs_for(handle: str) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def generate_weekly_report(handle: str, week_start: str | None = None) -> dict[str, Any]:
+def generate_weekly_report(
+    handle: str,
+    week_start: str | None = None,
+    *,
+    event_subject: str | None = None,
+) -> dict[str, Any]:
     canonical = store.canonical_handle(handle)
     week = week_start or _week_start()
     runs = _runs_for(canonical)
@@ -107,7 +112,11 @@ def generate_weekly_report(handle: str, week_start: str | None = None) -> dict[s
             " ON CONFLICT(handle, week_start) DO UPDATE SET content = excluded.content, created_at = excluded.created_at",
             (report_id, canonical, week, json.dumps(content, ensure_ascii=False), store._now()),
         )
-    product_events.track("weekly_report_generated", f"handle:{canonical}", {"week_start": week})
+    product_events.track(
+        "weekly_report_generated",
+        event_subject or f"handle:{canonical}",
+        {"week_start": week},
+    )
     return content
 
 

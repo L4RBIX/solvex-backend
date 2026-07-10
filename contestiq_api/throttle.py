@@ -24,6 +24,9 @@ DAILY_LIMITS: dict[str, int] = {
     "judge0_callback": 20000,
     "report_export": 200,
     "recommendation_feedback": 300,
+    "auth_register": 100,
+    "handle_claim": 30,
+    "handle_verify": 100,
 }
 
 

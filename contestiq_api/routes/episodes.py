@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from typing import Any
 
+from fastapi import APIRouter, Depends, Query
+
+from contestiq_api import auth
 from contestiq_api.cfdata import episodes as cf_episodes
 from contestiq_api.cfdata import taxonomy as cf_taxonomy
 from contestiq_api.errors import APIError
@@ -41,12 +44,12 @@ def taxonomy(version: str = TAXONOMY_VERSION):
 
 
 @router.post("/taxonomy/seed")
-def seed_taxonomy():
+def seed_taxonomy(_admin: dict[str, Any] = Depends(auth.require_admin)):
     return cf_taxonomy.seed_taxonomy()
 
 
 @router.post("/skill-map/rebuild")
-def rebuild_skill_map():
+def rebuild_skill_map(_admin: dict[str, Any] = Depends(auth.require_admin)):
     return cf_taxonomy.build_problem_skill_map()
 
 

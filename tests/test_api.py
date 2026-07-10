@@ -3,10 +3,17 @@ import json
 
 from fastapi.testclient import TestClient
 
+SECURITY_ADMIN_KEY = "legacy-route-security-key"
+
+
+def _admin_headers():
+    return {"X-Admin-Key": SECURITY_ADMIN_KEY}
+
 
 def _client(tmp_path, monkeypatch, extra_env=None):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CONTESTIQ_API_OFFLINE_SAMPLE", "1")
+    monkeypatch.setenv("ADMIN_API_KEY", SECURITY_ADMIN_KEY)
     for name in ["APP_ENV", "ENABLE_DEBUG_ENDPOINT", "CORS_ORIGINS", "RATE_LIMIT_ANALYZE_SECONDS"]:
         monkeypatch.delenv(name, raising=False)
     for name, value in (extra_env or {}).items():
@@ -38,6 +45,27 @@ def _client(tmp_path, monkeypatch, extra_env=None):
     importlib.reload(main)
 
     return TestClient(main.app)
+
+
+def _verified_headers(client, handle, *, premium=False):
+    user_response = client.post("/api/v1/auth/register")
+    assert user_response.status_code == 200
+    user = user_response.json()
+    admin_headers = {"X-Admin-Key": SECURITY_ADMIN_KEY}
+    bound = client.post(
+        "/api/v1/admin/handles/bind",
+        json={"user_id": user["user_id"], "handle": handle},
+        headers=admin_headers,
+    )
+    assert bound.status_code == 200
+    if premium:
+        granted = client.post(
+            f"/api/v1/admin/users/{user['user_id']}/grant-entitlement",
+            json={"plan": "premium_student"},
+            headers=admin_headers,
+        )
+        assert granted.status_code == 200
+    return {"Authorization": f"Bearer {user['api_token']}"}
 
 
 def _route_paths(client):
@@ -302,7 +330,7 @@ def test_analyze_rate_limit_does_not_affect_unrelated_endpoints(tmp_path, monkey
     client = _client(tmp_path, monkeypatch, {"RATE_LIMIT_ANALYZE_SECONDS": "30"})
     client.post("/api/analyze", json={"handle": "limited-user", "debug": False, "force_refresh": True})
     health = client.get("/api/health")
-    workspace = client.get("/api/workspace/handles")
+    workspace = client.get("/api/workspace/handles", headers=_admin_headers())
     assert health.status_code == 200
     assert workspace.status_code == 200
 
@@ -382,7 +410,9 @@ def test_feedback_problem_endpoint_saves_jsonl(tmp_path, monkeypatch):
         "feedback": "good_fit",
         "comment": "This looked relevant",
     }
-    response = client.post("/api/feedback/problem", json=payload)
+    response = client.post(
+        "/api/feedback/problem", json=payload, headers=_verified_headers(client, payload["handle"])
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "saved"
     assert (tmp_path / "api_cache" / "feedback" / "problem_feedback.jsonl").exists()
@@ -399,7 +429,9 @@ def test_outcome_endpoint_saves_jsonl(tmp_path, monkeypatch):
         "outcome": "attempted_but_failed",
         "comment": "Could not finish",
     }
-    response = client.post("/api/outcome/problem", json=payload)
+    response = client.post(
+        "/api/outcome/problem", json=payload, headers=_verified_headers(client, payload["handle"])
+    )
     assert response.status_code == 200
     assert (tmp_path / "api_cache" / "feedback" / "problem_outcomes.jsonl").exists()
 
@@ -412,7 +444,9 @@ def test_queue_feedback_endpoint_saves_jsonl(tmp_path, monkeypatch):
         "queue_rating": "good_fit",
         "comment": "The plan felt useful",
     }
-    response = client.post("/api/feedback/queue", json=payload)
+    response = client.post(
+        "/api/feedback/queue", json=payload, headers=_verified_headers(client, payload["handle"])
+    )
     assert response.status_code == 200
     assert (tmp_path / "api_cache" / "feedback" / "queue_feedback.jsonl").exists()
 
@@ -427,8 +461,39 @@ def test_invalid_feedback_value_is_rejected(tmp_path, monkeypatch):
         "anchor_skill": "graphs",
         "feedback": "perfect_mastery",
     }
-    response = client.post("/api/feedback/problem", json=payload)
+    response = client.post(
+        "/api/feedback/problem", json=payload, headers=_verified_headers(client, payload["handle"])
+    )
     assert response.status_code == 422
+
+
+def test_legacy_feedback_mutations_require_auth_and_verified_ownership(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    problem_payload = {
+        "analysis_id": "victim-analysis",
+        "handle": "victim-handle",
+        "problem_key": "1869B",
+        "slot_type": "focused_practice",
+        "anchor_skill": "graphs",
+        "feedback": "good_fit",
+    }
+    outcome_payload = {**problem_payload, "outcome": "solved"}
+    outcome_payload.pop("feedback")
+    queue_payload = {
+        "analysis_id": "victim-analysis",
+        "handle": "victim-handle",
+        "queue_rating": "good_fit",
+    }
+
+    assert client.post("/api/feedback/problem", json=problem_payload).status_code == 401
+    assert client.post("/api/outcome/problem", json=outcome_payload).status_code == 401
+    assert client.post("/api/feedback/queue", json=queue_payload).status_code == 401
+
+    attacker_headers = _verified_headers(client, "attacker-handle")
+    spoof = client.post("/api/feedback/problem", json=problem_payload, headers=attacker_headers)
+    assert spoof.status_code == 403
+    assert spoof.json()["error_code"] == "HANDLE_NOT_VERIFIED"
+    assert not (tmp_path / "api_cache" / "feedback" / "problem_feedback.jsonl").exists()
 
 
 def test_analyze_saves_progress_snapshot(tmp_path, monkeypatch):
@@ -512,10 +577,30 @@ def test_weekly_report_not_enough_history_with_one_snapshot(tmp_path, monkeypatc
     from contestiq_api.storage import save_snapshot
 
     save_snapshot("history-user", _snapshot("only", "2026-06-08T00:00:00+00:00"))
-    response = client.get("/api/analysis/history-user/weekly-report")
+    response = client.get(
+        "/api/analysis/history-user/weekly-report",
+        headers=_verified_headers(client, "history-user", premium=True),
+    )
     data = response.json()
     assert data["status"] == "not_enough_history"
     assert data["safe_interpretation"] == "ContestIQ needs at least two saved analyses to build a weekly report."
+
+
+def test_legacy_weekly_reports_require_auth_owner_and_entitlement(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    json_path = "/api/analysis/private-weekly/weekly-report"
+    markdown_path = "/api/analysis/private-weekly/weekly-report.md"
+
+    assert client.get(json_path).status_code == 401
+    assert client.get(markdown_path).status_code == 401
+
+    free_owner = _verified_headers(client, "private-weekly")
+    assert client.get(json_path, headers=free_owner).status_code == 402
+
+    different_owner = _verified_headers(client, "different-weekly", premium=True)
+    spoof = client.get(json_path, headers=different_owner)
+    assert spoof.status_code == 403
+    assert spoof.json()["error_code"] == "HANDLE_NOT_VERIFIED"
 
 
 def test_weekly_report_compares_latest_and_baseline(tmp_path, monkeypatch):
@@ -524,7 +609,10 @@ def test_weekly_report_compares_latest_and_baseline(tmp_path, monkeypatch):
 
     save_snapshot("history-user", _snapshot("baseline", "2026-06-01T00:00:00+00:00", "maintenance_stretch", watchlist=["dp"]))
     save_snapshot("history-user", _snapshot("latest", "2026-06-08T00:00:00+00:00", "focused_practice", watchlist=["graphs"], limited=["geometry"]))
-    response = client.get("/api/analysis/history-user/weekly-report")
+    response = client.get(
+        "/api/analysis/history-user/weekly-report",
+        headers=_verified_headers(client, "history-user", premium=True),
+    )
     data = response.json()
     assert data["status"] == "available"
     assert data["latest_analysis_id"] == "latest"
@@ -540,7 +628,10 @@ def test_weekly_report_includes_current_training_focus(tmp_path, monkeypatch):
 
     save_snapshot("history-user", _snapshot("baseline", "2026-06-01T00:00:00+00:00"))
     save_snapshot("history-user", _snapshot("latest", "2026-06-08T00:00:00+00:00"))
-    data = client.get("/api/analysis/history-user/weekly-report").json()
+    data = client.get(
+        "/api/analysis/history-user/weekly-report",
+        headers=_verified_headers(client, "history-user", premium=True),
+    ).json()
     focus = data["summary"]["current_training_focus"]
     assert focus == [
         {
@@ -562,7 +653,8 @@ def test_weekly_report_does_not_expose_internal_fields(tmp_path, monkeypatch):
     snap["skill_scores"] = [{"skill_id": "graphs"}]
     save_snapshot("history-user", snap)
     save_snapshot("history-user", _snapshot("latest", "2026-06-08T00:00:00+00:00"))
-    text = json.dumps(client.get("/api/analysis/history-user/weekly-report").json()).lower()
+    headers = _verified_headers(client, "history-user", premium=True)
+    text = json.dumps(client.get("/api/analysis/history-user/weekly-report", headers=headers).json()).lower()
     assert "skill_scores" not in text
     assert "secret" not in text
 
@@ -573,12 +665,13 @@ def test_weekly_report_safe_wording_avoids_banned_phrases(tmp_path, monkeypatch)
 
     save_snapshot("history-user", _snapshot("baseline", "2026-06-01T00:00:00+00:00"))
     save_snapshot("history-user", _snapshot("latest", "2026-06-08T00:00:00+00:00"))
-    text = json.dumps(client.get("/api/analysis/history-user/weekly-report").json()).lower()
+    headers = _verified_headers(client, "history-user", premium=True)
+    text = json.dumps(client.get("/api/analysis/history-user/weekly-report", headers=headers).json()).lower()
     banned = ["you improved", "you mastered", "proves your skill", "verified", "guaranteed"]
     assert all(phrase not in text for phrase in banned)
     from contestiq_api.safety import scan_public_payload
 
-    scan_public_payload(client.get("/api/analysis/history-user/weekly-report").json())
+    scan_public_payload(client.get("/api/analysis/history-user/weekly-report", headers=headers).json())
 
 
 def test_weekly_report_markdown_endpoint(tmp_path, monkeypatch):
@@ -587,7 +680,10 @@ def test_weekly_report_markdown_endpoint(tmp_path, monkeypatch):
 
     save_snapshot("history-user", _snapshot("baseline", "2026-06-01T00:00:00+00:00"))
     save_snapshot("history-user", _snapshot("latest", "2026-06-08T00:00:00+00:00"))
-    response = client.get("/api/analysis/history-user/weekly-report.md")
+    response = client.get(
+        "/api/analysis/history-user/weekly-report.md",
+        headers=_verified_headers(client, "history-user", premium=True),
+    )
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
     assert "# ContestIQ Weekly Training Report" in response.text
@@ -603,15 +699,29 @@ def test_existing_analyze_response_shape_still_public_safe(tmp_path, monkeypatch
 
 def test_feedback_analytics_endpoint_still_works(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
-    response = client.get("/api/feedback/summary")
+    response = client.get("/api/feedback/summary", headers={"X-Admin-Key": SECURITY_ADMIN_KEY})
     assert response.status_code == 200
     assert response.json()["status"] in {"available", "no_feedback"}
+
+
+def test_feedback_summaries_are_admin_only(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    assert client.get("/api/feedback/summary").status_code == 403
+    assert client.get("/api/feedback/summary.md").status_code == 403
+
+    user_headers = _verified_headers(client, "summary-user")
+    assert client.get("/api/feedback/summary", headers=user_headers).status_code == 403
+    assert client.get("/api/feedback/summary.md", headers=user_headers).status_code == 403
 
 
 def test_create_share_link_from_existing_analysis(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     analysis = client.post("/api/analyze", json={"handle": "share-user", "debug": True, "force_refresh": True}).json()
-    response = client.post("/api/analysis/share-user/share")
+    assert client.post("/api/analysis/share-user/share").status_code == 401
+    response = client.post(
+        "/api/analysis/share-user/share",
+        headers=_verified_headers(client, "share-user"),
+    )
     data = response.json()
     assert response.status_code == 200
     assert data["status"] == "created"
@@ -622,7 +732,10 @@ def test_create_share_link_from_existing_analysis(tmp_path, monkeypatch):
 
 def test_create_share_returns_analysis_not_found(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
-    response = client.post("/api/analysis/no-share/share")
+    response = client.post(
+        "/api/analysis/no-share/share",
+        headers=_verified_headers(client, "no-share"),
+    )
     assert response.status_code == 404
     assert response.json()["error_code"] == "ANALYSIS_NOT_FOUND"
 
@@ -630,7 +743,10 @@ def test_create_share_returns_analysis_not_found(tmp_path, monkeypatch):
 def test_public_share_endpoint_returns_report(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     client.post("/api/analyze", json={"handle": "share-report", "debug": True, "force_refresh": True})
-    share = client.post("/api/analysis/share-report/share").json()
+    share = client.post(
+        "/api/analysis/share-report/share",
+        headers=_verified_headers(client, "share-report"),
+    ).json()
     response = client.get(f"/api/share/{share['share_id']}")
     data = response.json()
     assert response.status_code == 200
@@ -642,7 +758,10 @@ def test_public_share_endpoint_returns_report(tmp_path, monkeypatch):
 def test_share_markdown_endpoint_returns_text_plain(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     client.post("/api/analyze", json={"handle": "share-md", "debug": False, "force_refresh": True})
-    share = client.post("/api/analysis/share-md/share").json()
+    share = client.post(
+        "/api/analysis/share-md/share",
+        headers=_verified_headers(client, "share-md"),
+    ).json()
     response = client.get(f"/api/share/{share['share_id']}.md")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
@@ -677,7 +796,10 @@ def test_build_public_report_strips_internal_fields(tmp_path, monkeypatch):
 def test_public_share_does_not_include_private_or_internal_fields(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     client.post("/api/analyze", json={"handle": "private-share", "debug": True, "force_refresh": True})
-    share = client.post("/api/analysis/private-share/share").json()
+    share = client.post(
+        "/api/analysis/private-share/share",
+        headers=_verified_headers(client, "private-share"),
+    ).json()
     report = client.get(f"/api/share/{share['share_id']}").json()["public_report"]
     text = json.dumps(report).lower()
     forbidden = [
@@ -696,7 +818,10 @@ def test_public_share_does_not_include_private_or_internal_fields(tmp_path, monk
 def test_public_share_safe_wording_avoids_banned_terms(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     client.post("/api/analyze", json={"handle": "wording-share", "debug": False, "force_refresh": True})
-    share = client.post("/api/analysis/wording-share/share").json()
+    share = client.post(
+        "/api/analysis/wording-share/share",
+        headers=_verified_headers(client, "wording-share"),
+    ).json()
     text = json.dumps(client.get(f"/api/share/{share['share_id']}").json()).lower()
     banned = [
         "verified",
@@ -723,7 +848,10 @@ def test_public_analyze_response_passes_safety_scan(tmp_path, monkeypatch):
 def test_share_markdown_passes_safety_scan(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     client.post("/api/analyze", json={"handle": "safety-md", "debug": False, "force_refresh": True})
-    share = client.post("/api/analysis/safety-md/share").json()
+    share = client.post(
+        "/api/analysis/safety-md/share",
+        headers=_verified_headers(client, "safety-md"),
+    ).json()
     markdown = client.get(f"/api/share/{share['share_id']}.md").text
     from contestiq_api.safety import assert_safe_public_text
 
@@ -752,14 +880,22 @@ def test_weekly_report_still_works_after_share_routes(tmp_path, monkeypatch):
 
     save_snapshot("history-user", _snapshot("baseline", "2026-06-01T00:00:00+00:00"))
     save_snapshot("history-user", _snapshot("latest", "2026-06-08T00:00:00+00:00"))
-    response = client.get("/api/analysis/history-user/weekly-report")
+    response = client.get(
+        "/api/analysis/history-user/weekly-report",
+        headers=_verified_headers(client, "history-user", premium=True),
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "available"
 
 
 def test_workspace_manual_save_handle(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
-    response = client.post("/api/workspace/handles", json={"handle": "tourist", "notes": "Strong baseline test"})
+    assert client.get("/api/workspace/handles").status_code == 403
+    response = client.post(
+        "/api/workspace/handles",
+        json={"handle": "tourist", "notes": "Strong baseline test"},
+        headers=_admin_headers(),
+    )
     data = response.json()
     assert response.status_code == 200
     assert data["handle"] == "tourist"
@@ -770,9 +906,9 @@ def test_workspace_manual_save_handle(tmp_path, monkeypatch):
 
 def test_workspace_lists_saved_handles(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
-    client.post("/api/workspace/handles", json={"handle": "tourist"})
-    client.post("/api/workspace/handles", json={"handle": "benq"})
-    response = client.get("/api/workspace/handles")
+    client.post("/api/workspace/handles", json={"handle": "tourist"}, headers=_admin_headers())
+    client.post("/api/workspace/handles", json={"handle": "benq"}, headers=_admin_headers())
+    response = client.get("/api/workspace/handles", headers=_admin_headers())
     data = response.json()
     assert response.status_code == 200
     assert data["status"] == "available"
@@ -783,11 +919,14 @@ def test_workspace_lists_saved_handles(tmp_path, monkeypatch):
 def test_workspace_delete_saved_handle_only(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     analysis = client.post("/api/analyze", json={"handle": "delete-me", "debug": False, "force_refresh": True}).json()
-    share = client.post("/api/analysis/delete-me/share").json()
-    response = client.delete("/api/workspace/handles/delete-me")
+    share = client.post(
+        "/api/analysis/delete-me/share",
+        headers=_verified_headers(client, "delete-me"),
+    ).json()
+    response = client.delete("/api/workspace/handles/delete-me", headers=_admin_headers())
     assert response.status_code == 200
     assert response.json()["status"] == "deleted"
-    assert client.get("/api/workspace/handles").json()["count"] == 0
+    assert client.get("/api/workspace/handles", headers=_admin_headers()).json()["count"] == 0
     assert (tmp_path / "api_cache" / "analyses" / "delete-me.json").exists()
     assert (tmp_path / "api_cache" / "shares" / f"{share['share_id']}.json").exists()
     assert client.get("/api/analysis/delete-me").json()["analysis_id"] == analysis["analysis_id"]
@@ -796,7 +935,7 @@ def test_workspace_delete_saved_handle_only(tmp_path, monkeypatch):
 def test_analyze_auto_upserts_workspace_handle(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     analysis = client.post("/api/analyze", json={"handle": "auto-save", "debug": False, "force_refresh": True}).json()
-    handles = client.get("/api/workspace/handles").json()["items"]
+    handles = client.get("/api/workspace/handles", headers=_admin_headers()).json()["items"]
     record = next(item for item in handles if item["handle"] == "auto-save")
     assert record["latest_analysis_id"] == analysis["analysis_id"]
     assert record["latest_analysis_created_at"] == analysis["created_at"]
@@ -807,8 +946,11 @@ def test_analyze_auto_upserts_workspace_handle(tmp_path, monkeypatch):
 def test_share_creation_updates_workspace_latest_share_id(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     client.post("/api/analyze", json={"handle": "share-workspace", "debug": False, "force_refresh": True})
-    share = client.post("/api/analysis/share-workspace/share").json()
-    record = client.get("/api/workspace/handles").json()["items"][0]
+    share = client.post(
+        "/api/analysis/share-workspace/share",
+        headers=_verified_headers(client, "share-workspace"),
+    ).json()
+    record = client.get("/api/workspace/handles", headers=_admin_headers()).json()["items"][0]
     assert record["handle"] == "share-workspace"
     assert record["latest_share_id"] == share["share_id"]
 
@@ -816,7 +958,7 @@ def test_share_creation_updates_workspace_latest_share_id(tmp_path, monkeypatch)
 def test_workspace_dashboard_returns_saved_handles(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     client.post("/api/analyze", json={"handle": "dash-user", "debug": False, "force_refresh": True})
-    response = client.get("/api/workspace/dashboard")
+    response = client.get("/api/workspace/dashboard", headers=_admin_headers())
     data = response.json()
     assert response.status_code == 200
     assert data["status"] == "available"
@@ -829,14 +971,18 @@ def test_workspace_dashboard_returns_saved_handles(tmp_path, monkeypatch):
 
 def test_workspace_invalid_handle_rejected(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
-    response = client.post("/api/workspace/handles", json={"handle": "bad handle!"})
+    response = client.post(
+        "/api/workspace/handles",
+        json={"handle": "bad handle!"},
+        headers=_admin_headers(),
+    )
     assert response.status_code == 422
 
 
 def test_workspace_does_not_expose_debug_internal_fields(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     client.post("/api/analyze", json={"handle": "workspace-safe", "debug": True, "force_refresh": True})
-    data = client.get("/api/workspace/dashboard").json()
+    data = client.get("/api/workspace/dashboard", headers=_admin_headers()).json()
     text = json.dumps(data).lower()
     forbidden = ["skill_scores", "normalized_history", "repair_blocking_reasons", "focused_practice_blocking_reasons"]
     assert all(term not in text for term in forbidden)
@@ -853,7 +999,10 @@ def test_existing_analyze_response_remains_frontend_safe_after_workspace(tmp_pat
 def test_existing_share_endpoints_still_work_after_workspace(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     client.post("/api/analyze", json={"handle": "workspace-share", "debug": False, "force_refresh": True})
-    share = client.post("/api/analysis/workspace-share/share").json()
+    share = client.post(
+        "/api/analysis/workspace-share/share",
+        headers=_verified_headers(client, "workspace-share"),
+    ).json()
     response = client.get(f"/api/share/{share['share_id']}")
     assert response.status_code == 200
     assert response.json()["status"] == "available"

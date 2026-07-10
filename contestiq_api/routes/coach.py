@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from contestiq_api import auth
 from contestiq_api.coach_service import (
     load_profile,
     save_solving_event,
@@ -52,13 +54,14 @@ class SolvingEventRequest(BaseModel):
 async def get_profile(
     anonymous_user_key: str | None = None,
     user_id: str | None = None,
+    user: dict[str, Any] = Depends(auth.require_user),
 ):
-    """Return the current user solving profile or null if none exists."""
+    """Return only the bearer token owner's private solving profile."""
     settings = get_settings()
     profile = await load_profile(
         settings,
-        user_id=user_id,
-        anonymous_user_key=anonymous_user_key,
+        user_id=user["user_id"],
+        anonymous_user_key=None,
     )
     if not profile:
         return {"status": "not_found", "profile": None}
@@ -66,13 +69,13 @@ async def get_profile(
 
 
 @router.post("/profile/update")
-async def update_profile(req: ProfileUpdateRequest):
+async def update_profile(req: ProfileUpdateRequest, user: dict[str, Any] = Depends(auth.require_user)):
     """Re-aggregate solving events and update the user profile. Returns updated profile."""
     settings = get_settings()
     profile = await update_user_solving_profile(
         settings,
-        user_id=req.user_id,
-        anonymous_user_key=req.anonymous_user_key,
+        user_id=user["user_id"],
+        anonymous_user_key=None,
     )
     if profile is None:
         return {"status": "no_data", "profile": None}
@@ -80,10 +83,12 @@ async def update_profile(req: ProfileUpdateRequest):
 
 
 @router.post("/events")
-async def create_event(req: SolvingEventRequest):
+async def create_event(req: SolvingEventRequest, user: dict[str, Any] = Depends(auth.require_user)):
     """Save a solving event from the frontend (run result, WA, accepted, etc.)."""
     settings = get_settings()
     event = req.model_dump()
     event["id"] = str(uuid.uuid4())
+    event["user_id"] = user["user_id"]
+    event["anonymous_user_key"] = None
     await save_solving_event(settings, event)
     return {"status": "ok"}

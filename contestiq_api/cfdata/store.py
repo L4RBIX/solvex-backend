@@ -849,6 +849,29 @@ CREATE TABLE IF NOT EXISTS cf_sync_jobs (
     completed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_cf_sync_jobs_handle ON cf_sync_jobs (handle, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS handle_claims (
+    claim_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    handle TEXT NOT NULL,
+    verification_code TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'verified', 'expired', 'superseded')),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    verified_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_handle_claims_user ON handle_claims (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_handle_claims_handle ON handle_claims (handle, status);
+
+CREATE TABLE IF NOT EXISTS handle_owners (
+    handle TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    claim_id TEXT REFERENCES handle_claims(claim_id),
+    bound_by TEXT NOT NULL DEFAULT 'self_verification',
+    verified_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_handle_owners_user ON handle_owners (user_id);
 """
 
 

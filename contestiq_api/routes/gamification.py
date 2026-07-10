@@ -1,13 +1,13 @@
 """v1 gamification endpoints (Phase G1): XP, levels, streak, daily goal, badges.
 
-Everything here is read-derived from `product_events` (Phase 10) — there is no
-gamification-owned table. A subject is resolved from the `handle` query param
-(the CF handle the learner is training with — matches how analysis, queues,
-and plans already identify anonymous/free learners) and/or the bearer token
-(premium/verification actions, which are tracked per `user_id`). Both are
-optional and this endpoint never raises for a caller with neither: it simply
-returns an empty "anonymous" snapshot, so a missing handle can never break the
-/analyze page.
+Everything here is read-derived from `product_events` (Phase 10) — there is
+no gamification-owned table.
+
+Security: every private endpoint below requires a bearer token and ALWAYS
+returns the authenticated caller's own data — never a caller-supplied
+`?handle=`. A Codeforces handle is public data and must never be trusted as
+identity; the subject is `user:<id>` plus the caller's VERIFIED handle (if
+any — see contestiq_api.handles), never an arbitrary query param.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from contestiq_api import auth, entitlements, gamification, metrics, product_events
@@ -24,8 +24,6 @@ from contestiq_api.errors import APIError
 from contestiq_api.service import validate_handle
 
 router = APIRouter(prefix="/api/v1/gamification")
-
-_EMPTY_SUBJECT = "anonymous"
 
 
 def _timed(name: str):
@@ -40,60 +38,18 @@ def _timed(name: str):
     return finish
 
 
-def resolve_subject(request: Request, handle: str | None) -> dict[str, Any]:
-    """Resolve one or more product_events subject aliases for the caller.
-
-    - `handle` (query param) maps to the `handle:<cf handle>` alias used by
-      analysis/queue/plan/weekly-report events.
-    - A bearer token (if present) maps to the `user:<user_id>` alias used by
-      verification/premium events, and — if that user account has a linked
-      handle and none was passed explicitly — also contributes the matching
-      `handle:` alias so both event styles merge into one learner.
-    """
-    ctx = entitlements.plan_context(request)
-    aliases: list[str] = []
-    primary: str | None = None
-
-    cleaned_handle: str | None = None
-    if handle:
-        cleaned_handle = validate_handle(handle)
-        alias = f"handle:{store.canonical_handle(cleaned_handle)}"
-        aliases.append(alias)
-        primary = alias
-
-    user = ctx.get("user")
-    user_id = user.get("user_id") if user else None
-    if user_id:
-        user_alias = f"user:{user_id}"
-        aliases.append(user_alias)
-        if primary is None:
-            primary = user_alias
-        if cleaned_handle is None:
-            stored_handle = user.get("handle")
-            if stored_handle:
-                handle_alias = f"handle:{store.canonical_handle(stored_handle)}"
-                if handle_alias not in aliases:
-                    aliases.append(handle_alias)
-                if primary is None:
-                    primary = handle_alias
-
-    plan = ctx["plan"]
-    if not aliases:
-        return {"aliases": [], "subject": _EMPTY_SUBJECT, "plan": plan}
-    return {"aliases": aliases, "subject": primary, "plan": plan}
-
-
-def _snapshot_for(request: Request, handle: str | None) -> dict[str, Any]:
-    resolved = resolve_subject(request, handle)
-    events = product_events.events_for_subjects(resolved["aliases"])
-    return gamification.build_snapshot(resolved["subject"], resolved["plan"], events)
+def _snapshot_for(caller: dict[str, Any]) -> dict[str, Any]:
+    user = auth.get_user(caller["user_id"])
+    plan = entitlements.effective_plan(user)
+    events = product_events.events_for_account(caller["user_id"])
+    return gamification.build_snapshot(caller["subject"], plan, events)
 
 
 @router.get("/me")
-def gamification_me(request: Request, handle: str | None = Query(default=None, min_length=3, max_length=24)):
+def gamification_me(caller: dict[str, Any] = Depends(auth.require_user_subject)):
     finish = _timed("me")
     try:
-        snapshot = _snapshot_for(request, handle)
+        snapshot = _snapshot_for(caller)
     except Exception:
         finish(ok=False)
         raise
@@ -102,10 +58,10 @@ def gamification_me(request: Request, handle: str | None = Query(default=None, m
 
 
 @router.get("/streak")
-def gamification_streak(request: Request, handle: str | None = Query(default=None, min_length=3, max_length=24)):
+def gamification_streak(caller: dict[str, Any] = Depends(auth.require_user_subject)):
     finish = _timed("streak")
     try:
-        snapshot = _snapshot_for(request, handle)
+        snapshot = _snapshot_for(caller)
     except Exception:
         finish(ok=False)
         raise
@@ -114,10 +70,10 @@ def gamification_streak(request: Request, handle: str | None = Query(default=Non
 
 
 @router.get("/daily-goal")
-def gamification_daily_goal(request: Request, handle: str | None = Query(default=None, min_length=3, max_length=24)):
+def gamification_daily_goal(caller: dict[str, Any] = Depends(auth.require_user_subject)):
     finish = _timed("daily_goal")
     try:
-        snapshot = _snapshot_for(request, handle)
+        snapshot = _snapshot_for(caller)
     except Exception:
         finish(ok=False)
         raise
@@ -126,10 +82,10 @@ def gamification_daily_goal(request: Request, handle: str | None = Query(default
 
 
 @router.get("/badges")
-def gamification_badges(request: Request, handle: str | None = Query(default=None, min_length=3, max_length=24)):
+def gamification_badges(caller: dict[str, Any] = Depends(auth.require_user_subject)):
     finish = _timed("badges")
     try:
-        snapshot = _snapshot_for(request, handle)
+        snapshot = _snapshot_for(caller)
     except Exception:
         finish(ok=False)
         raise
@@ -138,13 +94,13 @@ def gamification_badges(request: Request, handle: str | None = Query(default=Non
 
 
 @router.get("/activity")
-def gamification_activity(request: Request, handle: str | None = Query(default=None, min_length=3, max_length=24)):
+def gamification_activity(caller: dict[str, Any] = Depends(auth.require_user_subject)):
     """Recent XP breakdown (Phase G2 transparency): the last few meaningful
     events with the XP each one actually awarded, including 0-XP entries when
     the daily cap (or the once-per-day-per-type rule) applied."""
     finish = _timed("activity")
     try:
-        snapshot = _snapshot_for(request, handle)
+        snapshot = _snapshot_for(caller)
     except Exception:
         finish(ok=False)
         raise
@@ -153,12 +109,12 @@ def gamification_activity(request: Request, handle: str | None = Query(default=N
 
 
 @router.get("/quests")
-def gamification_quests(request: Request, handle: str | None = Query(default=None, min_length=3, max_length=24)):
+def gamification_quests(caller: dict[str, Any] = Depends(auth.require_user_subject)):
     """Daily + weekly quests (Phase G2). Progress UI only — quests never award
     XP themselves, so they cannot double-count or bypass the daily cap."""
     finish = _timed("quests")
     try:
-        snapshot = _snapshot_for(request, handle)
+        snapshot = _snapshot_for(caller)
     except Exception:
         finish(ok=False)
         raise
@@ -182,7 +138,9 @@ def gamification_recompute(payload: RecomputeRequest, admin: dict[str, Any] = De
     cache to invalidate (it always derives live from product_events), this
     simply replays a target subject's history on demand — useful for support
     ("why doesn't my badge show up?") without granting the browser any wider
-    admin surface."""
+    admin surface. Admin-supplied handle/user_id here is fine: it is not
+    caller-controlled identity spoofing, it is an authenticated admin
+    explicitly inspecting a specific account."""
     if not payload.handle and not payload.user_id:
         raise APIError("GAMIFICATION_TARGET_REQUIRED", "Provide a handle or user_id to recompute.", 422)
 
@@ -218,7 +176,7 @@ def gamification_recompute(payload: RecomputeRequest, admin: dict[str, Any] = De
                     aliases.append(handle_alias)
 
         events = product_events.events_for_subjects(aliases)
-        snapshot = gamification.build_snapshot(primary or _EMPTY_SUBJECT, plan, events)
+        snapshot = gamification.build_snapshot(primary or "anonymous", plan, events)
     except Exception:
         finish(ok=False)
         raise

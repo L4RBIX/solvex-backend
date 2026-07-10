@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from contestiq_api.cfdata import store
@@ -34,6 +35,21 @@ EVENT_TYPES = {
     "duel_arena_opened",
     "duel_hint_used",
 }
+
+
+def subject_for_handle_action(handle: str, user: dict[str, Any] | None) -> str:
+    """Attribute a handle-scoped action without treating the handle as auth.
+
+    Only a bearer-authenticated verified owner earns account activity. Public
+    visitors still produce legacy/public telemetry, which is excluded from
+    the owner's post-verification private history by ``events_for_account``.
+    """
+    from contestiq_api import handles
+
+    canonical = store.canonical_handle(handle)
+    if user and user.get("user_id") and handles.owner_user_id_for_handle(canonical) == user["user_id"]:
+        return f"user:{user['user_id']}"
+    return f"handle:{canonical}"
 
 
 def track(event_type: str, subject: str, properties: dict[str, Any] | None = None) -> bool:
@@ -86,3 +102,52 @@ def events_for_subjects(subjects: list[str]) -> list[dict[str, Any]]:
             subjects,
         ).fetchall()
     return [{**dict(row), "properties": json.loads(row["properties"])} for row in rows]
+
+
+def _parse_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def events_for_account(user_id: str) -> list[dict[str, Any]]:
+    """Return private account activity plus a bounded legacy-handle history.
+
+    A verified handle permits safe reconciliation of telemetry that predates
+    verification. It does *not* make future public handle events trustworthy:
+    anyone may still run public analysis for that handle. Account-owned
+    actions after verification are recorded under ``user:<id>`` instead.
+    """
+    from contestiq_api import handles
+
+    user_subject = f"user:{user_id}"
+    binding = handles.verified_binding_for_user(user_id)
+    subjects = [user_subject]
+    handle_subject: str | None = None
+    cutoff: datetime | None = None
+    if binding:
+        handle_subject = f"handle:{binding['handle']}"
+        subjects.append(handle_subject)
+        cutoff = _parse_time(binding["verified_at"])
+
+    events = events_for_subjects(subjects)
+    bounded = [
+        event
+        for event in events
+        if event.get("subject") != handle_subject
+        or cutoff is None
+        or _parse_time(event["created_at"]) <= cutoff
+    ]
+
+    # first_* uniqueness was historically enforced per subject. Once two
+    # proven aliases are reconciled, keep only the earliest milestone so a
+    # handle→account transition cannot award the same onboarding XP twice.
+    result: list[dict[str, Any]] = []
+    seen_first: set[str] = set()
+    for event in bounded:
+        event_type = str(event.get("event_type") or "")
+        if event_type.startswith("first_"):
+            if event_type in seen_first:
+                continue
+            seen_first.add(event_type)
+        result.append(event)
+    return result

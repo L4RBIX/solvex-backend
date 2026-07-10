@@ -22,8 +22,6 @@ from fastapi.testclient import TestClient
 from contestiq_api.cfdata import store, taxonomy
 
 ADMIN_KEY = "duels-shared-test-admin-key"
-HANDLE_A = "Shared-Creator"
-HANDLE_B = "Shared-Challenger"
 
 # The exact production bug input: CF 1393B "Applejack and Storages". Correct
 # solution condition is `quads >= 1 && pairs >= 4` and the correct answer for
@@ -71,21 +69,43 @@ def catalog():
     return problems
 
 
-def _create(client):
+def admin():
+    return {"X-Admin-Key": ADMIN_KEY}
+
+
+def make_user(client):
+    return client.post("/api/v1/admin/users", json={}, headers=admin()).json()
+
+
+def bearer(user):
+    return {"Authorization": f"Bearer {user['api_token']}"}
+
+
+@pytest.fixture
+def user_a(client):
+    return make_user(client)
+
+
+@pytest.fixture
+def user_b(client):
+    return make_user(client)
+
+
+def _create(client, user):
     return client.post(
-        f"/api/v1/duels?handle={HANDLE_A}",
-        json={"mode": "rapid_10", "display_name": "Creator"},
+        "/api/v1/duels", json={"mode": "rapid_10", "display_name": "Creator"}, headers=bearer(user)
     ).json()
 
 
-def _seed_active(client):
-    created = _create(client)
+def _seed_active(client, user_a, user_b):
+    created = _create(client, user_a)
     client.post(
         "/api/v1/duels/join",
-        json={"invite_code": created["invite_code"], "display_name": "Challenger", "handle": HANDLE_B},
+        json={"invite_code": created["invite_code"], "display_name": "Challenger"},
+        headers=bearer(user_b),
     )
-    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_A}")
-    client.post(f"/api/v1/duels/{created['duel_id']}/ready?handle={HANDLE_B}")
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready", headers=bearer(user_a))
+    client.post(f"/api/v1/duels/{created['duel_id']}/ready", headers=bearer(user_b))
     import datetime as dt
     past = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=1)).isoformat()
     with store.connect() as conn:
@@ -93,20 +113,21 @@ def _seed_active(client):
     return created
 
 
-def _submit(client, duel_id, handle, result, *, source="print(1)", stdin="", expected_output="1"):
+def _submit(client, duel_id, user, result, *, source="print(1)", stdin="", expected_output="1"):
     with patch("contestiq_api.judge0_client.run_submission", new_callable=AsyncMock, return_value=result):
         with patch("contestiq_api.settings.get_settings") as gs:
             gs.return_value.judge0_base_url = "https://judge0.test"
             gs.return_value.judge0_api_key = "super-secret-judge0-key"
             gs.return_value.judge0_api_host = ""
             return client.post(
-                f"/api/v1/duels/{duel_id}/submit?handle={handle}",
+                f"/api/v1/duels/{duel_id}/submit",
                 json={
                     "language": "python3",
                     "source_code": source,
                     "stdin": stdin,
                     "expected_output": expected_output,
                 },
+                headers=bearer(user),
             )
 
 
@@ -123,17 +144,17 @@ WRONG = {
 # ─── Required regression: Applejack must not be falsely rejected ─────────────
 
 
-def test_applejack_correct_solution_is_accepted(client, catalog):
+def test_applejack_correct_solution_is_accepted(client, catalog, user_a, user_b):
     """The standard `quads >= 1 && pairs >= 4` solution, judged against the
     exact input from the production bug report, must be accepted — the
     general judging pipeline must not invent a rejection."""
-    created = _seed_active(client)
+    created = _seed_active(client, user_a, user_b)
     mock_result = {
         "status": "accepted", "passed": True, "stdout": "YES", "stderr": "",
         "compile_output": "", "time_ms": 5, "memory_kb": 100, "message": "accepted",
     }
     response = _submit(
-        client, created["duel_id"], HANDLE_A, mock_result,
+        client, created["duel_id"], user_a, mock_result,
         source=APPLEJACK_SOLUTION_SOURCE, stdin=APPLEJACK_INPUT, expected_output=APPLEJACK_EXPECTED,
     )
     assert response.status_code == 200
@@ -146,9 +167,9 @@ def test_applejack_correct_solution_is_accepted(client, catalog):
 # ─── custom-test pass is not official_accepted ────────────────────────────────
 
 
-def test_custom_test_pass_is_not_official_accepted(client, catalog):
-    created = _seed_active(client)
-    response = _submit(client, created["duel_id"], HANDLE_A, ACCEPTED)
+def test_custom_test_pass_is_not_official_accepted(client, catalog, user_a, user_b):
+    created = _seed_active(client, user_a, user_b)
+    response = _submit(client, created["duel_id"], user_a, ACCEPTED)
     body = response.json()
     assert body["verdict"] == "custom_tests_passed"
     assert body["verdict"] != "official_accepted"
@@ -158,9 +179,9 @@ def test_custom_test_pass_is_not_official_accepted(client, catalog):
     assert winner["verdict"] == "custom_tests_passed"
 
 
-def test_result_reason_says_custom_test_pass_not_solved_codeforces(client, catalog):
-    created = _seed_active(client)
-    body = _submit(client, created["duel_id"], HANDLE_A, ACCEPTED).json()
+def test_result_reason_says_custom_test_pass_not_solved_codeforces(client, catalog, user_a, user_b):
+    created = _seed_active(client, user_a, user_b)
+    body = _submit(client, created["duel_id"], user_a, ACCEPTED).json()
     reason = body["duel"]["result_reason"]
     assert reason == "first_custom_test_pass"
     assert "solved" not in reason
@@ -170,16 +191,16 @@ def test_result_reason_says_custom_test_pass_not_solved_codeforces(client, catal
 # ─── Both players share the same server-controlled test set ─────────────────
 
 
-def test_both_players_judged_on_same_shared_test(client, catalog):
-    created = _seed_active(client)
+def test_both_players_judged_on_same_shared_test(client, catalog, user_a, user_b):
+    created = _seed_active(client, user_a, user_b)
     duel_id = created["duel_id"]
 
     # A submits first with stdin="5", expected="10" — this locks the duel's
     # shared test, regardless of what B later proposes. Use a WRONG verdict so
     # the duel stays active for B to submit next.
-    _submit(client, duel_id, HANDLE_A, WRONG, stdin="5", expected_output="10")
+    _submit(client, duel_id, user_a, WRONG, stdin="5", expected_output="10")
 
-    state = client.get(f"/api/v1/duels/{duel_id}/state?handle={HANDLE_B}").json()
+    state = client.get(f"/api/v1/duels/{duel_id}/state", headers=bearer(user_b)).json()
     assert state["test_locked"] is True
     assert state["shared_test"] == {"input": "5", "expected_output": "10"}
 
@@ -192,13 +213,14 @@ def test_both_players_judged_on_same_shared_test(client, catalog):
             gs.return_value.judge0_api_key = ""
             gs.return_value.judge0_api_host = ""
             client.post(
-                f"/api/v1/duels/{duel_id}/submit?handle={HANDLE_B}",
+                f"/api/v1/duels/{duel_id}/submit",
                 json={
                     "language": "python3",
                     "source_code": "print(1)",
                     "stdin": "99",
                     "expected_output": "wrong-value",
                 },
+                headers=bearer(user_b),
             )
     assert mock_run.call_args.kwargs["stdin"] == "5"
     assert mock_run.call_args.kwargs["expected_output"] == "10"
@@ -207,18 +229,18 @@ def test_both_players_judged_on_same_shared_test(client, catalog):
 # ─── User cannot self-select expected output for ranked winner determination ─
 
 
-def test_second_participant_cannot_self_select_expected_output(client, catalog):
+def test_second_participant_cannot_self_select_expected_output(client, catalog, user_a, user_b):
     """B's code always prints '2'. B tries to submit expected_output='2' (a
     self-picked value engineered to match their own output and force a win).
     The locked test from A ('1' -> '1') must be used instead, so B's exploit
     attempt is judged against the real shared test and correctly fails."""
-    created = _seed_active(client)
+    created = _seed_active(client, user_a, user_b)
     duel_id = created["duel_id"]
 
     # A locks the shared test at stdin="", expected="1" (WRONG verdict so the
     # duel stays active for B to attempt the exploit next).
-    _submit(client, duel_id, HANDLE_A, WRONG, stdin="", expected_output="1")
-    assert client.get(f"/api/v1/duels/{duel_id}/state?handle={HANDLE_A}").json()["shared_test"] == {
+    _submit(client, duel_id, user_a, WRONG, stdin="", expected_output="1")
+    assert client.get(f"/api/v1/duels/{duel_id}/state", headers=bearer(user_a)).json()["shared_test"] == {
         "input": "", "expected_output": "1"
     }
 
@@ -240,26 +262,28 @@ def test_second_participant_cannot_self_select_expected_output(client, catalog):
             gs.return_value.judge0_api_key = ""
             gs.return_value.judge0_api_host = ""
             response = client.post(
-                f"/api/v1/duels/{duel_id}/submit?handle={HANDLE_B}",
+                f"/api/v1/duels/{duel_id}/submit",
                 json={"language": "python3", "source_code": "print(2)", "stdin": "", "expected_output": "2"},
+                headers=bearer(user_b),
             )
     body = response.json()
     assert body["passed"] is False  # exploit did not work — judged against locked "1", not self-picked "2"
     assert body["verdict"] == "custom_tests_failed"
 
 
-def test_resubmit_by_same_participant_still_uses_locked_test(client, catalog):
-    created = _seed_active(client)
+def test_resubmit_by_same_participant_still_uses_locked_test(client, catalog, user_a, user_b):
+    created = _seed_active(client, user_a, user_b)
     duel_id = created["duel_id"]
-    _submit(client, duel_id, HANDLE_A, WRONG, stdin="7", expected_output="14")
+    _submit(client, duel_id, user_a, WRONG, stdin="7", expected_output="14")
     with patch("contestiq_api.judge0_client.run_submission", new_callable=AsyncMock, return_value=ACCEPTED) as mock_run:
         with patch("contestiq_api.settings.get_settings") as gs:
             gs.return_value.judge0_base_url = "https://judge0.test"
             gs.return_value.judge0_api_key = ""
             gs.return_value.judge0_api_host = ""
             client.post(
-                f"/api/v1/duels/{duel_id}/submit?handle={HANDLE_A}",
+                f"/api/v1/duels/{duel_id}/submit",
                 json={"language": "python3", "source_code": "print(14)", "stdin": "different", "expected_output": "different"},
+                headers=bearer(user_a),
             )
     assert mock_run.call_args.kwargs["stdin"] == "7"
     assert mock_run.call_args.kwargs["expected_output"] == "14"
@@ -268,14 +292,14 @@ def test_resubmit_by_same_participant_still_uses_locked_test(client, catalog):
 # ─── No hidden/source/admin/Judge0 secrets exposed ────────────────────────────
 
 
-def test_state_and_submit_never_expose_secrets_including_new_fields(client, catalog):
-    created = _seed_active(client)
+def test_state_and_submit_never_expose_secrets_including_new_fields(client, catalog, user_a, user_b):
+    created = _seed_active(client, user_a, user_b)
     duel_id = created["duel_id"]
     body = _submit(
-        client, duel_id, HANDLE_A, ACCEPTED,
+        client, duel_id, user_a, ACCEPTED,
         source="SECRET_SHARED_TEST_SOURCE_XYZ", stdin="5", expected_output="10",
     ).json()
-    state = client.get(f"/api/v1/duels/{duel_id}/state?handle={HANDLE_B}").json()
+    state = client.get(f"/api/v1/duels/{duel_id}/state", headers=bearer(user_b)).json()
 
     for payload in (body, state):
         raw = json.dumps(payload).lower()
@@ -285,6 +309,8 @@ def test_state_and_submit_never_expose_secrets_including_new_fields(client, cata
         assert "invite_code" not in raw
         assert "judge0_api_key" not in raw
         assert "admin" not in raw
+        assert user_a["api_token"].lower() not in raw
+        assert user_b["api_token"].lower() not in raw
 
     # New honest fields ARE present and are not secret (nothing official to hide).
     assert state["judging_mode"] == "custom_tests"

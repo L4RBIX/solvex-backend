@@ -42,7 +42,8 @@ def analyze(handle: str, ctx: dict[str, Any] = Depends(entitlements.plan_context
     metrics.inc("analysis_runs_total")
     from contestiq_api import product_events
 
-    product_events.track("first_analysis_completed", f"handle:{cleaned.lower()}", {"run_id": payload["run_id"]})
+    event_subject = product_events.subject_for_handle_action(cleaned, ctx.get("user"))
+    product_events.track("first_analysis_completed", event_subject, {"run_id": payload["run_id"]})
     return entitlements.shape_weakness_response(_with_metadata(payload), ctx)
 
 

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from typing import Any
+
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import PlainTextResponse
 
+from contestiq_api import auth, entitlements, handles
 from contestiq_api.errors import APIError
 from contestiq_api.models import AnalyzeRequest
 from contestiq_api.progress_report import analysis_history, generate_weekly_report, weekly_report_markdown
@@ -60,13 +63,50 @@ def history(handle: str):
 
 
 @router.get("/api/analysis/{handle}/weekly-report")
-def weekly_report(handle: str):
-    return generate_weekly_report(handle)
+def weekly_report(
+    handle: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+    ctx: dict[str, Any] = Depends(entitlements.plan_context),
+):
+    cleaned = _require_weekly_report_access(handle, user, ctx)
+    report = generate_weekly_report(cleaned)
+    _track_weekly_report_view(user)
+    return report
 
 
 @router.get("/api/analysis/{handle}/weekly-report.md", response_class=PlainTextResponse)
-def weekly_report_md(handle: str):
-    return weekly_report_markdown(handle)
+def weekly_report_md(
+    handle: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+    ctx: dict[str, Any] = Depends(entitlements.plan_context),
+):
+    cleaned = _require_weekly_report_access(handle, user, ctx)
+    report = weekly_report_markdown(cleaned)
+    _track_weekly_report_view(user)
+    return report
+
+
+def _track_weekly_report_view(user: dict[str, Any]) -> None:
+    from contestiq_api import product_events
+
+    product_events.track("weekly_report_generated", f"user:{user['user_id']}")
+
+
+def _require_weekly_report_access(
+    handle: str,
+    user: dict[str, Any],
+    ctx: dict[str, Any],
+) -> str:
+    """Authorize the legacy report surface without making analysis private."""
+    cleaned = validate_handle(handle)
+    if handles.owner_user_id_for_handle(cleaned) != user["user_id"]:
+        raise APIError(
+            "HANDLE_NOT_VERIFIED",
+            "Verify ownership of this Codeforces handle before viewing its weekly report.",
+            403,
+        )
+    entitlements.require_feature(ctx, "weekly_report")
+    return cleaned
 
 
 @router.get("/api/analysis/{handle}/progress")
