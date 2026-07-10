@@ -190,7 +190,7 @@ def test_state_returns_live_participant_statuses(client, catalog):
     state = _state(client, created["duel_id"], HANDLE_A).json()
     assert state["status"] == "active"
     assert state["server_time"]
-    assert state["judging_mode"] == "sample"
+    assert state["judging_mode"] == "custom_tests"
     assert state["problem"]["problem_id"]
     opponent = next(p for p in state["participants"] if not p["is_viewer"])
     assert opponent["ready"] is True
@@ -312,7 +312,7 @@ def test_first_accept_wins_when_hints_not_worse(client, catalog):
     response = _submit(client, created["duel_id"], HANDLE_A, ACCEPTED)
     duel = response.json()["duel"]
     assert duel["status"] == "completed"
-    assert duel["result_reason"] == "first_accepted"
+    assert duel["result_reason"] == "first_custom_test_pass"
     winner = next(p for p in duel["participants"] if p["is_winner"])
     assert winner["handle"] == HANDLE_A.lower()
 
@@ -338,7 +338,7 @@ def test_equal_hints_earlier_accept_wins(client, catalog):
     duel = duels.get_duel(duel_id)
     assert duel["status"] == "completed"
     assert duel["winner_subject"] == SUBJECT_B
-    assert duel["result_reason"] == "first_accepted"
+    assert duel["result_reason"] == "first_custom_test_pass"
 
 
 def test_hint_use_can_settle_pending_decision(client, catalog):

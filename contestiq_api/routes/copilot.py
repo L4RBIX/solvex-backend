@@ -205,6 +205,98 @@ class CopilotResponse(BaseModel):
     model: str
     suggested_next_action: str | None = None
     detected_issue_type: str | None = None
+    # Evidence classification (see EVIDENCE VERIFICATION below): tells the
+    # frontend whether a correctness claim in `message` is backed by an actual
+    # execution result, or is unverified model reasoning.
+    evidence_type: str = "no_verified_failure"
+    verified_wrong: bool = False
+
+
+# ─── Evidence verification (correctness-claim guard) ─────────────────────────
+#
+# Root cause of the false "your solution is wrong" bug: the LLM was instructed
+# to "mentally run" the code and invent counterexamples from its own training
+# knowledge of a problem — with zero execution behind it. For external
+# Codeforces problems the catalog stores no official statement or tests, so
+# there is no oracle to actually verify an invented counterexample against.
+#
+# Fix: classify the ONLY evidence we can trust — the real ExecutionContext
+# (compiler/runtime/judge output already produced by Judge0) — independently
+# of what the LLM says, then downgrade+disclaim any LLM claim that the code
+# is wrong when that claim isn't backed by this verified evidence.
+
+EVIDENCE_COMPILE_ERROR = "compile_error"
+EVIDENCE_RUNTIME_ERROR = "runtime_error"
+EVIDENCE_VERIFIED_TEST_FAILURE = "verified_test_failure"
+EVIDENCE_VERIFIED_COUNTEREXAMPLE = "verified_counterexample"
+EVIDENCE_SPECULATIVE_REVIEW = "speculative_review"
+EVIDENCE_NO_VERIFIED_FAILURE = "no_verified_failure"
+
+_UNVERIFIABLE_DISCLAIMER = "I cannot confirm this solution is wrong from the available tests."
+
+# Correctness-verdict claims only — deliberately narrower than generic advice
+# ("you should check edge cases") so ordinary hints aren't flagged.
+_NEGATIVE_CLAIM_PATTERNS = [
+    re.compile(r"\byour\s+(code|solution|program|approach|logic)\s+(is|looks?|seems?|appears?)\s+(wrong|incorrect|broken|buggy|flawed)\b", re.I),
+    re.compile(r"\bthis\s+(is|looks?|seems?)\s+(wrong|incorrect)\b", re.I),
+    re.compile(r"\bis\s+(definitely|clearly)?\s*incorrect\b", re.I),
+    re.compile(r"\bnot\s+correct\b", re.I),
+    re.compile(r"\bcounterexample\b", re.I),
+    re.compile(r"\b(will|would)\s+(fail|break)\b", re.I),
+    re.compile(r"\bfails?\s+(on|for|when|with)\s+(input|n\s*=|the\s+case)", re.I),
+    re.compile(r"\b(the\s+)?(correct|expected|right)\s+answer\s+(should\s+be|is)\s+\S", re.I),
+    re.compile(r"\byour\s+code\s+outputs?\b.{0,80}\bbut\b.{0,80}\bexpected\b", re.I),
+    re.compile(r"\bshould\s+(output|print|return|be)\s+(YES|NO|\d|true|false|\"|')", re.I),
+    re.compile(r"\bgives?\s+(the\s+)?wrong\s+answer\b", re.I),
+]
+
+
+def _contains_negative_correctness_claim(text: str) -> bool:
+    return any(p.search(text) for p in _NEGATIVE_CLAIM_PATTERNS)
+
+
+def _classify_execution_evidence(exec_ctx: ExecutionContext) -> str:
+    """Deterministic evidence classification from REAL execution output only —
+    never from LLM text. This is the trusted oracle we actually have."""
+    status = (exec_ctx.last_status or "").lower().replace(" ", "_")
+    if "compil" in status or exec_ctx.last_compile_output.strip():
+        return EVIDENCE_COMPILE_ERROR
+    if "runtime" in status:
+        return EVIDENCE_RUNTIME_ERROR
+    if (
+        ("wrong_answer" in status or "wrong answer" in status)
+        and exec_ctx.last_expected_output.strip()
+        and exec_ctx.last_actual_output.strip()
+    ):
+        return EVIDENCE_VERIFIED_TEST_FAILURE
+    return EVIDENCE_NO_VERIFIED_FAILURE
+
+
+def _enforce_evidence_policy(response_text: str, evidence: str) -> tuple[str, str, bool]:
+    """Copilot may call code incorrect only for verified execution failures.
+
+    Any correctness-verdict claim not backed by `evidence` is downgraded to
+    speculative_review and prefixed with the mandatory disclaimer — this is
+    the actual bug fix: it makes hallucinated counterexamples (like the
+    fabricated Applejack "should be NO" claim) impossible to present as fact,
+    regardless of what the model generated.
+    """
+    claims_wrong = _contains_negative_correctness_claim(response_text)
+    if not claims_wrong:
+        return response_text, evidence, False
+
+    if evidence in (EVIDENCE_COMPILE_ERROR, EVIDENCE_RUNTIME_ERROR):
+        return response_text, evidence, True
+    if evidence == EVIDENCE_VERIFIED_TEST_FAILURE:
+        return response_text, EVIDENCE_VERIFIED_COUNTEREXAMPLE, True
+
+    # No verified failure exists — the claim is speculative model reasoning,
+    # not proof. Never let it stand alone as a verdict.
+    disclaimer = (
+        f"⚠️ Unverified claim — {_UNVERIFIABLE_DISCLAIMER} "
+        "The note below is a code-review opinion, not a proven failure.\n\n"
+    )
+    return disclaimer + response_text, EVIDENCE_SPECULATIVE_REVIEW, False
 
 
 # ─── System prompt ────────────────────────────────────────────────────────────
@@ -235,21 +327,21 @@ _SYSTEM_PROMPT = (
     "- If the profile says the user often misses edge cases, proactively suggest testing n=0, n=1, n=2.\n\n"
 
     "CORRECTNESS VERIFICATION — CRITICAL:\n"
-    "- NEVER say a solution is correct unless you have mentally run it on EVERY provided sample test "
-    "and it produces the right output for all of them.\n"
-    "- If sample tests are given, CHECK the user's code logic against each one before responding. "
-    "If the code fails even one sample, it is WRONG — say so immediately.\n"
-    "- Lead with a counterexample when you find one: "
-    "'Your code outputs X on input Y, but the expected answer is Z.'\n"
-    "- For Wrong Answer context: your first job is to find the SMALLEST input that breaks the code. "
-    "Do NOT praise the approach or say it looks right.\n"
-    "- For game / math / number theory problems: be especially skeptical of simple parity (n%2) or "
-    "single-condition logic. Mentally test n=1, n=2, n=3, n=4 against the user's code and the expected "
-    "answer before drawing any conclusion.\n"
-    "- If you cannot confirm correctness with certainty, say: "
-    "'I cannot confirm this is correct yet — let me check a few cases.'\n"
-    "- NEVER say 'your solution looks correct', 'this should work', or 'the logic is right' "
-    "without first verifying against sample tests.\n\n"
+    "- You will be given a line '[Verified execution evidence: <type>]'. This reflects code that was "
+    "ACTUALLY COMPILED AND RUN by the judge — it is the only ground truth you have. You did not run the "
+    "code yourself, and for many problems you were not given the official statement or official tests, "
+    "so your own recollection of the problem or 'mental execution' of the code CANNOT be trusted as proof.\n"
+    "- You may state the code is wrong, buggy, or will fail ONLY when evidence is compile_error, "
+    "runtime_error, or verified_test_failure. In that case, quote the ACTUAL input/expected/actual output "
+    "already provided to you — never invent a new input.\n"
+    "- If evidence is no_verified_failure (nothing has been verified to fail), do NOT claim the solution "
+    "is wrong, do NOT invent a counterexample input/output, and do NOT assert what the 'correct' answer "
+    "for some input should be. You may still share a code-review concern, but you MUST phrase it as a "
+    "hypothesis you have not verified, e.g. 'One thing I'd double check (not yet verified): ...' — and if "
+    "asked directly whether the code is correct, say: "
+    f"'{_UNVERIFIABLE_DISCLAIMER}'\n"
+    "- NEVER say 'your solution looks correct', 'this should work', or 'the logic is right' either, "
+    "without verified evidence — when unverified, say you cannot confirm correctness either way.\n\n"
 
     "Use the same language as the user when possible: English, Russian, or Kazakh."
 )
@@ -347,6 +439,11 @@ def _build_context_message(req: CopilotRequest) -> str:
                 line += f" {ev.summary}"
             lines.append(line)
         parts.append("\n".join(lines))
+
+    # Ground-truth evidence line — computed deterministically from exec_ctx,
+    # never from the model's own claims. See _classify_execution_evidence.
+    evidence = _classify_execution_evidence(exec_ctx)
+    parts.append(f"[Verified execution evidence: {evidence}]")
 
     parts.append(f"User question: {req.message}")
     return "\n\n".join(parts)
@@ -574,6 +671,12 @@ async def copilot_chat(req: CopilotRequest, request: Request) -> CopilotResponse
 
     assistant_content, model_used = await _call_deepseek(settings, user_content, max_tokens=max_tokens)
 
+    # Enforce the evidence policy on the RAW model output before anything else
+    # sees it — persistence, coach memory, and the API response all get the
+    # policy-corrected message, never the unverified original.
+    evidence = _classify_execution_evidence(req.effective_execution())
+    assistant_content, evidence_type, verified_wrong = _enforce_evidence_policy(assistant_content, evidence)
+
     issue_type = _detect_issue_type(req, assistant_content)
     next_action = _suggest_next_action(req)
 
@@ -649,4 +752,6 @@ async def copilot_chat(req: CopilotRequest, request: Request) -> CopilotResponse
         model=model_used,
         suggested_next_action=next_action,
         detected_issue_type=issue_type,
+        evidence_type=evidence_type,
+        verified_wrong=verified_wrong,
     )

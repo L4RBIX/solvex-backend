@@ -778,7 +778,11 @@ CREATE TABLE IF NOT EXISTS duel_matches (
     winner_subject TEXT,
     result_reason TEXT,
     countdown_started_at TEXT,
-    winner_decided_at TEXT
+    winner_decided_at TEXT,
+    test_input TEXT,
+    test_expected_output TEXT,
+    test_locked_by TEXT,
+    test_locked_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_duel_matches_creator ON duel_matches (creator_subject, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_duel_matches_status ON duel_matches (status, expires_at);
@@ -875,6 +879,10 @@ _COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     "duel_matches": [
         ("countdown_started_at", "TEXT"),
         ("winner_decided_at", "TEXT"),
+        ("test_input", "TEXT"),
+        ("test_expected_output", "TEXT"),
+        ("test_locked_by", "TEXT"),
+        ("test_locked_at", "TEXT"),
     ],
 }
 

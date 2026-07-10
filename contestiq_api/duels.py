@@ -1,11 +1,15 @@
-"""Friend 1v1 duels by invite link (Phase G4).
+"""Friend 1v1 duels by invite link (Phase G4 / G4.1).
 
-Invite-only private matches: same assigned CF problem, first accepted
-submission wins. No matchmaking, no Elo, no tournaments, no chat.
+Invite-only private matches: same assigned CF problem, first to pass the
+shared custom test wins. No matchmaking, no Elo, no tournaments, no chat.
 
 Judging reuses Judge0 via the Arena execute path. CF catalog problems do not
-store official tests, so submit accepts optional stdin/expected_output (same
-as Arena sample judging). Source code is hashed only — never returned.
+store official tests, so judging is always JUDGING_MODE_CUSTOM (never
+"authoritative" — see the honest VERDICT_* constants). The (stdin,
+expected_output) pair from the FIRST submission in a duel is locked as the
+shared test for BOTH participants — a player cannot self-select their own
+expected output to win (see _lock_shared_test). Source code is hashed only —
+never returned.
 """
 
 from __future__ import annotations
@@ -32,6 +36,33 @@ COUNTDOWN_SECONDS = 4
 DUEL_HINTS_MAX = 3
 # judging_at older than this is treated as a crashed judge run, not "judging".
 JUDGING_STALE_SECONDS = 90
+
+# Honest judging labels (hotfix): the CF catalog stores no official statements
+# or tests, so a duel can NEVER claim authoritative Codeforces correctness —
+# it is always judged against a shared custom test, locked from whichever
+# participant submits first. "authoritative" is reserved for a future
+# internal problem set with a real oracle; none exists today.
+JUDGING_MODE_AUTHORITATIVE = "authoritative"
+JUDGING_MODE_CUSTOM = "custom_tests"
+
+VERDICT_NO_TESTS = "no_tests"
+VERDICT_COMPILE_ERROR = "compile_error"
+VERDICT_RUNTIME_ERROR = "runtime_error"
+VERDICT_CUSTOM_PASSED = "custom_tests_passed"
+VERDICT_CUSTOM_FAILED = "custom_tests_failed"
+VERDICT_OFFICIAL_ACCEPTED = "official_accepted"
+
+_JUDGE_STATUS_TO_VERDICT = {
+    "accepted": VERDICT_CUSTOM_PASSED,
+    "compilation_error": VERDICT_COMPILE_ERROR,
+    "runtime_error": VERDICT_RUNTIME_ERROR,
+}
+
+
+def _judge_status_to_verdict(judge_status: str | None) -> str:
+    if judge_status is None:
+        return VERDICT_NO_TESTS
+    return _JUDGE_STATUS_TO_VERDICT.get(judge_status, VERDICT_CUSTOM_FAILED)
 
 WAITING = "waiting"
 ACTIVE = "active"
@@ -306,7 +337,7 @@ def _finalize_duel(duel_id: str, *, at_timeout: bool) -> bool:
         ):
             return False  # opponent can still accept with fewer hints and win
         status, winner = COMPLETED, acc["subject"]
-        reason = "opponent_timeout" if at_timeout else "first_accepted"
+        reason = "opponent_timeout" if at_timeout else "first_custom_test_pass"
     else:
         ranked = sorted(accepted, key=_rank_key)
         first, second = ranked[0], ranked[1]
@@ -317,7 +348,7 @@ def _finalize_duel(duel_id: str, *, at_timeout: bool) -> bool:
             if int(first.get("hint_count") or 0) != int(second.get("hint_count") or 0):
                 reason = "fewer_hints"
             elif (first.get("accepted_at") or "") != (second.get("accepted_at") or ""):
-                reason = "first_accepted"
+                reason = "first_custom_test_pass"
             else:
                 reason = "fewer_wrong_attempts"
 
@@ -648,6 +679,44 @@ def use_hint(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
     }
 
 
+def _lock_shared_test(duel_id: str, subject: str, stdin: str, expected_output: str) -> tuple[str, str]:
+    """Lock the duel's shared test on first submission, or return the already-
+    locked test. Every submission — by either participant — is judged against
+    this SAME (stdin, expected_output) pair, so no one can pick their own
+    expected output for a ranked win (hotfix for a self-selection exploit).
+    """
+    duel = get_duel(duel_id)
+    if duel and duel.get("test_expected_output"):
+        return duel.get("test_input") or "", duel["test_expected_output"]
+
+    now = store._now()
+    with store.connect() as conn:
+        cursor = conn.execute(
+            "UPDATE duel_matches SET test_input = ?, test_expected_output = ?,"
+            " test_locked_by = ?, test_locked_at = ?"
+            " WHERE duel_id = ? AND test_expected_output IS NULL",
+            (stdin, expected_output, subject, now, duel_id),
+        )
+    if cursor.rowcount == 1:
+        return stdin, expected_output
+    # Lost a concurrent race to lock — use whichever submission won it.
+    winner = get_duel(duel_id) or {}
+    return winner.get("test_input") or "", winner.get("test_expected_output") or expected_output
+
+
+def _latest_judge_statuses(duel_id: str) -> dict[str, str]:
+    with store.connect() as conn:
+        rows = conn.execute(
+            "SELECT participant_subject, judge_status FROM duel_submissions"
+            " WHERE duel_id = ? ORDER BY created_at",
+            (duel_id,),
+        ).fetchall()
+    latest: dict[str, str] = {}
+    for row in rows:
+        latest[row["participant_subject"]] = row["judge_status"]
+    return latest
+
+
 async def submit_solution(
     duel_id: str,
     subject_aliases: list[str],
@@ -673,13 +742,20 @@ async def submit_solution(
         raise APIError("EMPTY_SOURCE", "source_code cannot be empty.", 422)
     # Without an expected output, any program that merely runs would count as
     # accepted — no basis for a duel verdict. (CF catalog stores no official
-    # tests; this stays sample/custom-test judging and the UI says so.)
+    # tests; this stays custom-test judging and the UI says so.)
     if expected_output is None or not expected_output.strip():
         raise APIError(
             "EXPECTED_OUTPUT_REQUIRED",
             "Duel judging compares your program's output against an expected output — provide a test with its expected output.",
             422,
         )
+
+    # Server-controlled shared test set: whoever submits first in the duel
+    # locks (stdin, expected_output) for BOTH participants. Any test a later
+    # submission supplies — including the second participant's own guess —
+    # is ignored for judging, so no one can self-select their own expected
+    # output to win.
+    judge_stdin, judge_expected = _lock_shared_test(duel_id, participant["subject"], stdin, expected_output)
 
     from contestiq_api.judge0_client import run_submission
     from contestiq_api.settings import get_settings
@@ -700,8 +776,8 @@ async def submit_solution(
             api_host=settings.judge0_api_host,
             language_id=_LANGUAGE_IDS[language],
             source_code=source_code,
-            stdin=stdin,
-            expected_output=expected_output,
+            stdin=judge_stdin,
+            expected_output=judge_expected,
         )
     finally:
         with store.connect() as conn:
@@ -710,6 +786,7 @@ async def submit_solution(
                 (duel_id, participant["subject"]),
             )
     passed = bool(result.get("passed")) or result.get("status") == "accepted"
+    verdict = _judge_status_to_verdict(result.get("status"))
     submission_id = str(uuid.uuid4())
     now = store._now()
     with store.connect() as conn:
@@ -749,6 +826,8 @@ async def submit_solution(
     return {
         "submission_id": submission_id,
         "judge_status": result.get("status"),
+        "verdict": verdict,
+        "judging_mode": JUDGING_MODE_CUSTOM,
         "passed": passed,
         "runtime_ms": result.get("time_ms"),
         "memory_kb": result.get("memory_kb"),
@@ -810,6 +889,7 @@ def public_detail(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
                 (duel_id,),
             ).fetchall()
         }
+    latest_statuses = _latest_judge_statuses(duel_id)
 
     return {
         "duel_id": duel["duel_id"],
@@ -823,6 +903,9 @@ def public_detail(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
         "completed_at": duel.get("completed_at"),
         "winner_subject": duel.get("winner_subject"),
         "result_reason": duel.get("result_reason"),
+        # Honest judging labels (hotfix): never claim official CF correctness.
+        "judging_mode": JUDGING_MODE_CUSTOM,
+        "test_locked": bool(duel.get("test_expected_output")),
         "viewer_subject": viewer["subject"] if viewer else None,
         "viewer_role": viewer["role"] if viewer else None,
         "participants": [
@@ -831,6 +914,7 @@ def public_detail(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
                 "handle": p.get("handle"),
                 "role": p["role"],
                 "final_status": p["final_status"],
+                "verdict": _judge_status_to_verdict(latest_statuses.get(p["subject"])),
                 "ready": bool(p.get("ready_at")),
                 "accepted_at": p.get("accepted_at"),
                 "joined_at": p["joined_at"],
@@ -890,6 +974,7 @@ def duel_state(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
     participants = list_participants(duel_id)
     problem = store.get_problem(duel["problem_id"])
     winner_subject = duel.get("winner_subject")
+    latest_statuses = _latest_judge_statuses(duel_id)
 
     participant_states = [
         {
@@ -909,11 +994,14 @@ def duel_state(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
             "accepted_at": p.get("accepted_at"),
             "seconds_to_accept": _seconds_to_accept(duel, p),
             "final_status": p["final_status"],
+            # Honest per-participant verdict — see VERDICT_* constants.
+            "verdict": _judge_status_to_verdict(latest_statuses.get(p["subject"])),
             "is_winner": winner_subject == p["subject"],
         }
         for p in participants
     ]
 
+    test_locked = bool(duel.get("test_expected_output"))
     state: dict[str, Any] = {
         "duel_id": duel_id,
         "mode": duel["mode"],
@@ -926,9 +1014,22 @@ def duel_state(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
         "arena_path": arena_path(duel_id),
         "duration_minutes": int(MODES[duel["mode"]]["duration_minutes"]),
         "hints_max": DUEL_HINTS_MAX,
-        # Honest judging label: the CF catalog stores no official tests.
-        "judging_mode": "sample",
-        "judging_note": "Practice duel uses sample/custom test judging — not official Codeforces tests.",
+        # Honest judging labels (hotfix): the CF catalog stores no official
+        # tests, so this can never claim authoritative Codeforces correctness.
+        # Judging is against ONE shared test locked from the first submission
+        # — the same test for both participants (no self-selected expected
+        # output). Not official; exposing it is safe (nothing hidden here).
+        "judging_mode": JUDGING_MODE_CUSTOM,
+        "judging_note": (
+            "Practice duel: judged against a shared custom test locked from the first "
+            "submission — not official Codeforces tests."
+        ),
+        "test_locked": test_locked,
+        "shared_test": (
+            {"input": duel.get("test_input") or "", "expected_output": duel.get("test_expected_output")}
+            if test_locked
+            else None
+        ),
         "problem": _problem_public(problem, duel["problem_id"], duel.get("problem_rating")),
         "skill_id": duel.get("skill_id"),
         "participants": participant_states,
@@ -972,6 +1073,7 @@ def result_view(duel_id: str, subject_aliases: list[str]) -> dict[str, Any]:
         "winner_display_name": winner["display_name"] if winner else None,
         "result_reason": duel.get("result_reason"),
         "completed_at": duel.get("completed_at"),
+        "judging_mode": JUDGING_MODE_CUSTOM,
         "participants": detail["participants"],
         "problem": detail["problem"],
         "viewer_won": viewer_won,

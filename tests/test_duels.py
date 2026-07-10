@@ -206,7 +206,7 @@ def test_accepted_submission_wins(client, catalog):
     body = response.json()
     assert body["passed"] is True
     assert body["duel"]["status"] == "completed"
-    assert body["duel"]["result_reason"] == "first_accepted"
+    assert body["duel"]["result_reason"] == "first_custom_test_pass"
     winners = [p for p in body["duel"]["participants"] if p["is_winner"]]
     assert len(winners) == 1
     assert winners[0]["handle"] == HANDLE_A.lower()
