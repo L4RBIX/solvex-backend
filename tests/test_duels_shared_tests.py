@@ -1,14 +1,9 @@
-"""Hotfix regression tests: server-controlled shared duel test set + honest
-judging verdicts (Phase G4.1 follow-up).
+"""Regression tests for server-controlled immutable PvP judging data.
 
-Bug context: duel submit previously trusted each participant's own
-`expected_output` independently, meaning a player could pick an expected
-output that just matched their own program's output and always "win" — and
-the UI/verdict language implied real Codeforces correctness even though the
-catalog stores no official tests. This file locks in the fix: the FIRST
-submission's (stdin, expected_output) becomes the one shared test for BOTH
-participants, and verdicts are always honestly labeled "custom_tests_*",
-never "official_accepted".
+The unsafe implementation let the first participant define the match oracle.
+Now only reviewed problem packs are eligible, their tests are snapshotted at
+creation, participant test fields are ignored, and hidden expected outputs are
+never returned.
 """
 
 from __future__ import annotations
@@ -19,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from contestiq_api import duels
 from contestiq_api.cfdata import store, taxonomy
 
 ADMIN_KEY = "duels-shared-test-admin-key"
@@ -66,6 +62,15 @@ def catalog():
         })
     store.save_problemset_snapshot({"problems": problems, "problemStatistics": []})
     taxonomy.build_problem_skill_map()
+    for problem in problems:
+        key = f"{problem['contestId']}{problem['index']}"
+        assert duels.upsert_duel_problem_pack({
+            "pack_id": f"test-{key}-v1", "problem_id": key, "version": 1,
+            "statement_summary": "Print one for the shared test.", "input_format": "No input.",
+            "output_format": "Print 1.", "constraints_text": "No input values.",
+            "sample_tests": [{"input": "", "output": "1\n"}],
+            "judge_tests": [{"input": "server input\n", "expected_output": "1\n"}],
+        })
     return problems
 
 
@@ -141,6 +146,86 @@ WRONG = {
 }
 
 
+def test_duel_creation_skips_catalog_problems_without_server_tests(client, catalog, user_a):
+    valid_key = f"{catalog[-1]['contestId']}{catalog[-1]['index']}"
+    with store.connect() as conn:
+        conn.execute("DELETE FROM duel_problem_packs WHERE problem_id != ?", (valid_key,))
+    created = _create(client, user_a)
+    assert created["problem"]["problem_id"] == valid_key
+    assert created["problem"]["content_complete"] is True
+    assert created["problem"]["statement_summary"]
+
+
+def test_duel_creation_fails_actionably_when_no_judgeable_problem_exists(client, catalog, user_a):
+    with store.connect() as conn:
+        conn.execute("DELETE FROM duel_problem_packs")
+    response = client.post(
+        "/api/v1/duels", json={"mode": "rapid_10"}, headers=bearer(user_a)
+    )
+    assert response.status_code == 503
+    assert response.json()["error_code"] == "NO_JUDGEABLE_DUEL_PROBLEMS"
+    assert "server-controlled test set" in response.json()["message"]
+
+
+def test_duel_cannot_start_after_locked_tests_go_missing(client, catalog, user_a, user_b):
+    created = _create(client, user_a)
+    duel_id = created["duel_id"]
+    client.post(
+        "/api/v1/duels/join", json={"invite_code": created["invite_code"]}, headers=bearer(user_b)
+    )
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE duel_matches SET test_cases_json = NULL, test_set_hash = NULL WHERE duel_id = ?",
+            (duel_id,),
+        )
+    assert client.post(f"/api/v1/duels/{duel_id}/ready", headers=bearer(user_a)).status_code == 200
+    blocked = client.post(f"/api/v1/duels/{duel_id}/ready", headers=bearer(user_b))
+    assert blocked.status_code == 409
+    assert blocked.json()["error_code"] == "DUEL_TESTS_UNAVAILABLE"
+    with store.connect() as conn:
+        row = conn.execute("SELECT status, winner_subject FROM duel_matches WHERE duel_id = ?", (duel_id,)).fetchone()
+    assert row["status"] == "waiting"
+    assert row["winner_subject"] is None
+
+
+def test_no_tests_is_not_wrong_answer_and_cannot_create_winner(client, catalog, user_a, user_b):
+    created = _seed_active(client, user_a, user_b)
+    duel_id = created["duel_id"]
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE duel_matches SET test_cases_json = NULL, test_set_hash = NULL WHERE duel_id = ?",
+            (duel_id,),
+        )
+    response = client.post(
+        f"/api/v1/duels/{duel_id}/submit",
+        json={
+            "language": "python3", "source_code": "print('anything')",
+            "stdin": "attacker input", "expected_output": "anything",
+        },
+        headers=bearer(user_a),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["verdict"] == "no_tests"
+    assert body["judge_status"] == "no_tests"
+    assert body["passed"] is False
+    assert "Your solution was not evaluated" in body["message"]
+    with store.connect() as conn:
+        duel_row = conn.execute(
+            "SELECT status, winner_subject FROM duel_matches WHERE duel_id = ?", (duel_id,)
+        ).fetchone()
+        participant = conn.execute(
+            "SELECT wrong_attempts, accepted_at FROM duel_participants WHERE duel_id = ? AND user_id = ?",
+            (duel_id, user_a["user_id"]),
+        ).fetchone()
+        submissions = conn.execute("SELECT COUNT(*) FROM duel_submissions WHERE duel_id = ?", (duel_id,)).fetchone()[0]
+    assert duel_row["status"] == "active"
+    assert duel_row["winner_subject"] is None
+    assert participant["wrong_attempts"] == 0
+    assert participant["accepted_at"] is None
+    assert submissions == 0
+
+
 # ─── Required regression: Applejack must not be falsely rejected ─────────────
 
 
@@ -195,14 +280,17 @@ def test_both_players_judged_on_same_shared_test(client, catalog, user_a, user_b
     created = _seed_active(client, user_a, user_b)
     duel_id = created["duel_id"]
 
-    # A submits first with stdin="5", expected="10" — this locks the duel's
-    # shared test, regardless of what B later proposes. Use a WRONG verdict so
-    # the duel stays active for B to submit next.
+    with store.connect() as conn:
+        before = dict(conn.execute(
+            "SELECT test_cases_json, test_set_hash, test_locked_by FROM duel_matches WHERE duel_id = ?",
+            (duel_id,),
+        ).fetchone())
     _submit(client, duel_id, user_a, WRONG, stdin="5", expected_output="10")
 
     state = client.get(f"/api/v1/duels/{duel_id}/state", headers=bearer(user_b)).json()
     assert state["test_locked"] is True
-    assert state["shared_test"] == {"input": "5", "expected_output": "10"}
+    assert state["shared_test"] is None
+    assert before["test_locked_by"] == "server"
 
     # B proposes a totally different test ("99" -> "wrong-value") — it must be
     # silently ignored; B is judged against A's locked test instead. We assert
@@ -222,8 +310,14 @@ def test_both_players_judged_on_same_shared_test(client, catalog, user_a, user_b
                 },
                 headers=bearer(user_b),
             )
-    assert mock_run.call_args.kwargs["stdin"] == "5"
-    assert mock_run.call_args.kwargs["expected_output"] == "10"
+    assert mock_run.call_args.kwargs["stdin"] == "server input\n"
+    assert mock_run.call_args.kwargs["expected_output"] == "1\n"
+    with store.connect() as conn:
+        after = dict(conn.execute(
+            "SELECT test_cases_json, test_set_hash, test_locked_by FROM duel_matches WHERE duel_id = ?",
+            (duel_id,),
+        ).fetchone())
+    assert after == before
 
 
 # ─── User cannot self-select expected output for ranked winner determination ─
@@ -237,12 +331,8 @@ def test_second_participant_cannot_self_select_expected_output(client, catalog, 
     created = _seed_active(client, user_a, user_b)
     duel_id = created["duel_id"]
 
-    # A locks the shared test at stdin="", expected="1" (WRONG verdict so the
-    # duel stays active for B to attempt the exploit next).
     _submit(client, duel_id, user_a, WRONG, stdin="", expected_output="1")
-    assert client.get(f"/api/v1/duels/{duel_id}/state", headers=bearer(user_a)).json()["shared_test"] == {
-        "input": "", "expected_output": "1"
-    }
+    assert client.get(f"/api/v1/duels/{duel_id}/state", headers=bearer(user_a)).json()["shared_test"] is None
 
     # B's exploit attempt: self-select expected_output="2" to match their own
     # program's fixed output. Judge0 is mocked to honestly compare against
@@ -285,8 +375,8 @@ def test_resubmit_by_same_participant_still_uses_locked_test(client, catalog, us
                 json={"language": "python3", "source_code": "print(14)", "stdin": "different", "expected_output": "different"},
                 headers=bearer(user_a),
             )
-    assert mock_run.call_args.kwargs["stdin"] == "7"
-    assert mock_run.call_args.kwargs["expected_output"] == "14"
+    assert mock_run.call_args.kwargs["stdin"] == "server input\n"
+    assert mock_run.call_args.kwargs["expected_output"] == "1\n"
 
 
 # ─── No hidden/source/admin/Judge0 secrets exposed ────────────────────────────
@@ -312,7 +402,8 @@ def test_state_and_submit_never_expose_secrets_including_new_fields(client, cata
         assert user_a["api_token"].lower() not in raw
         assert user_b["api_token"].lower() not in raw
 
-    # New honest fields ARE present and are not secret (nothing official to hide).
+    # Judging metadata is present, but the hidden oracle is not.
     assert state["judging_mode"] == "custom_tests"
-    assert state["shared_test"] == {"input": "5", "expected_output": "10"}
+    assert state["shared_test"] is None
+    assert "server input" not in json.dumps(state).lower()
     assert body["duel"]["judging_mode"] == "custom_tests"

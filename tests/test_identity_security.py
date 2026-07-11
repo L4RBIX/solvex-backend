@@ -21,7 +21,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from contestiq_api import handles, product_events
+from contestiq_api import duels, handles, product_events
 from contestiq_api.cfdata import store, taxonomy
 
 ADMIN_KEY = "identity-security-admin-key"
@@ -55,6 +55,14 @@ def catalog():
         })
     store.save_problemset_snapshot({"problems": problems, "problemStatistics": []})
     taxonomy.build_problem_skill_map()
+    for problem in problems:
+        key = f"{problem['contestId']}{problem['index']}"
+        assert duels.upsert_duel_problem_pack({
+            "pack_id": f"test-{key}-v1", "problem_id": key, "version": 1,
+            "statement_summary": "Print one for the shared test.", "input_format": "No input.",
+            "output_format": "Print 1.", "constraints_text": "No input values.",
+            "sample_tests": [], "judge_tests": [{"input": "", "expected_output": "1\n"}],
+        })
     return problems
 
 

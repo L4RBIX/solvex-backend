@@ -14,7 +14,7 @@ import httpx
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field, field_validator
 
-from contestiq_api import auth
+from contestiq_api import auth, duels
 from contestiq_api.coach_service import (
     detect_error_type as _coach_detect_error_type,
     format_profile_for_prompt,
@@ -138,6 +138,7 @@ class RecentEvent(BaseModel):
 
 class CopilotRequest(BaseModel):
     session_id: str | None = None
+    duel_id: str | None = None
     message: str
     mode: CopilotMode = "general"
     help_level: int = Field(default=2, ge=1, le=5)
@@ -211,6 +212,7 @@ class CopilotResponse(BaseModel):
     # execution result, or is unverified model reasoning.
     evidence_type: str = "no_verified_failure"
     verified_wrong: bool = False
+    context_label: str | None = None
 
 
 # ─── Evidence verification (correctness-claim guard) ─────────────────────────
@@ -647,13 +649,19 @@ async def _persist(
 
 @router.post("/copilot", response_model=CopilotResponse)
 async def copilot_chat(req: CopilotRequest, request: Request) -> CopilotResponse:
+    user = auth.current_user(request)
+    memory_user_id = user["user_id"] if user else None
+    context_label = duels.authorize_copilot_context(
+        memory_user_id,
+        req.duel_id,
+        source_code=req.effective_editor().source_code,
+    )
+
     client_ip = request.client.host if request.client else "unknown"
     _check_rate_limit(client_ip)
 
     session_id = req.session_id or str(uuid.uuid4())
     settings = get_settings()
-    user = auth.current_user(request)
-    memory_user_id = user["user_id"] if user else None
 
     # ── Load coach profile (best-effort, never blocks on failure) ─────────────
     profile: dict | None = None
@@ -669,6 +677,12 @@ async def copilot_chat(req: CopilotRequest, request: Request) -> CopilotResponse
 
     # ── Build context message (with profile prepended if available) ───────────
     user_content = _build_context_message(req)
+    if context_label:
+        user_content = (
+            "[Context: Post-match review]\n"
+            "Analyze only the requesting participant's verified own submission. "
+            "Never infer, request, or reveal opponent source code.\n\n" + user_content
+        )
     if profile:
         profile_block = format_profile_for_prompt(profile)
         user_content = profile_block + "\n\n---\n\n" + user_content
@@ -763,4 +777,5 @@ async def copilot_chat(req: CopilotRequest, request: Request) -> CopilotResponse
         detected_issue_type=issue_type,
         evidence_type=evidence_type,
         verified_wrong=verified_wrong,
+        context_label=context_label,
     )

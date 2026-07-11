@@ -782,10 +782,30 @@ CREATE TABLE IF NOT EXISTS duel_matches (
     test_input TEXT,
     test_expected_output TEXT,
     test_locked_by TEXT,
-    test_locked_at TEXT
+    test_locked_at TEXT,
+    problem_pack_id TEXT,
+    test_cases_json TEXT,
+    test_set_hash TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_duel_matches_creator ON duel_matches (creator_subject, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_duel_matches_status ON duel_matches (status, expires_at);
+
+CREATE TABLE IF NOT EXISTS duel_problem_packs (
+    pack_id TEXT PRIMARY KEY,
+    problem_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    statement_summary TEXT NOT NULL,
+    input_format TEXT NOT NULL,
+    output_format TEXT NOT NULL,
+    constraints_text TEXT NOT NULL,
+    sample_tests TEXT NOT NULL DEFAULT '[]',
+    judge_tests TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    UNIQUE(problem_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_duel_problem_packs_active
+    ON duel_problem_packs (active, problem_id, version DESC);
 
 CREATE TABLE IF NOT EXISTS duel_participants (
     duel_id TEXT NOT NULL,
@@ -918,6 +938,9 @@ _COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("test_expected_output", "TEXT"),
         ("test_locked_by", "TEXT"),
         ("test_locked_at", "TEXT"),
+        ("problem_pack_id", "TEXT"),
+        ("test_cases_json", "TEXT"),
+        ("test_set_hash", "TEXT"),
     ],
 }
 

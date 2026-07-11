@@ -52,6 +52,15 @@ def catalog():
         })
     store.save_problemset_snapshot({"problems": problems, "problemStatistics": []})
     taxonomy.build_problem_skill_map()
+    for problem in problems:
+        key = f"{problem['contestId']}{problem['index']}"
+        assert duels.upsert_duel_problem_pack({
+            "pack_id": f"test-{key}-v1", "problem_id": key, "version": 1,
+            "statement_summary": "Print one for the shared test.", "input_format": "No input.",
+            "output_format": "Print 1.", "constraints_text": "No input values.",
+            "sample_tests": [{"input": "", "output": "1\n"}],
+            "judge_tests": [{"input": "", "expected_output": "1\n"}],
+        })
     return problems
 
 
