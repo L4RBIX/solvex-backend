@@ -21,13 +21,17 @@ router = APIRouter(prefix="/api/v1")
 
 @router.post("/auth/register")
 def register(request: Request):
-    """Create a fresh, anonymous SolveX account and return a bearer token.
+    """Deprecated development-only account helper.
 
-    No email/password — the token itself is the credential (same model as
-    admin-issued tokens). It proves nothing about any Codeforces identity;
-    call /handles/claim to prove ownership of a CF handle before it can be
-    used for PvP, private leaderboards, or XP tied to that handle.
+    Production accounts are created by Supabase Auth and synchronized on the
+    first verified JWT request. This helper remains only for the existing
+    non-production regression suite and never runs in production.
     """
+    from contestiq_api.errors import APIError
+    from contestiq_api.settings import get_settings
+
+    if get_settings().app_env == "production":
+        raise APIError("ENDPOINT_RETIRED", "Use Supabase Auth to create an account.", 410)
     throttle(request, "auth_register")
     return auth.create_user(role="user")
 
@@ -38,6 +42,8 @@ def me(user: dict[str, Any] = Depends(auth.require_user)):
     return {
         "user_id": user["user_id"],
         "role": user["role"],
+        "email": user.get("email"),
+        "auth_provider": user.get("auth_provider", "legacy"),
         "handle": verified_handle,
         "handle_verified": verified_handle is not None,
     }

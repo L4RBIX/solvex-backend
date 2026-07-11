@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from contestiq_api import auth
+from contestiq_api import auth, duels
 from contestiq_api.coach_service import (
     load_profile,
     save_solving_event,
@@ -24,12 +24,14 @@ router = APIRouter(prefix="/api/copilot")
 class ProfileUpdateRequest(BaseModel):
     anonymous_user_key: str | None = None
     user_id: str | None = None
+    duel_id: str | None = None
 
 
 class SolvingEventRequest(BaseModel):
     anonymous_user_key: str | None = None
     user_id: str | None = None
     session_id: str | None = None
+    duel_id: str | None = None
     problem_id: str | None = None
     contest_id: int | None = None
     problem_index: str | None = None
@@ -54,9 +56,11 @@ class SolvingEventRequest(BaseModel):
 async def get_profile(
     anonymous_user_key: str | None = None,
     user_id: str | None = None,
+    duel_id: str | None = None,
     user: dict[str, Any] = Depends(auth.require_user),
 ):
     """Return only the bearer token owner's private solving profile."""
+    duels.authorize_copilot_context(user["user_id"], duel_id, verify_post_match_source=False)
     settings = get_settings()
     profile = await load_profile(
         settings,
@@ -71,6 +75,7 @@ async def get_profile(
 @router.post("/profile/update")
 async def update_profile(req: ProfileUpdateRequest, user: dict[str, Any] = Depends(auth.require_user)):
     """Re-aggregate solving events and update the user profile. Returns updated profile."""
+    duels.authorize_copilot_context(user["user_id"], req.duel_id, verify_post_match_source=False)
     settings = get_settings()
     profile = await update_user_solving_profile(
         settings,
@@ -85,8 +90,12 @@ async def update_profile(req: ProfileUpdateRequest, user: dict[str, Any] = Depen
 @router.post("/events")
 async def create_event(req: SolvingEventRequest, user: dict[str, Any] = Depends(auth.require_user)):
     """Save a solving event from the frontend (run result, WA, accepted, etc.)."""
+    duels.authorize_copilot_context(
+        user["user_id"], req.duel_id, verify_post_match_source=False
+    )
     settings = get_settings()
     event = req.model_dump()
+    event.pop("duel_id", None)
     event["id"] = str(uuid.uuid4())
     event["user_id"] = user["user_id"]
     event["anonymous_user_key"] = None

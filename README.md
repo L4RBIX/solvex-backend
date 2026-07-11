@@ -105,6 +105,7 @@ Configuration is read from environment variables:
 - `RATE_LIMIT_ANALYZE_SECONDS`: simple in-memory cooldown for `POST /api/analyze`; defaults to `0` in development and `30` in production.
 - `PORT`: optional hosting port.
 - `DATABASE_PATH`: SQLite path shared by backend jobs, users/entitlements, and the Codeforces problem catalog/skill map. On Railway this MUST point at a mounted persistent volume (e.g. `/data/backend_jobs.db`) or the catalog/skill map are wiped on every redeploy — see "Persistent Storage on Railway" in `docs/deployment.md`.
+- `SUPABASE_URL`, `SUPABASE_JWT_ISSUER`, `SUPABASE_JWT_AUDIENCE`, and `SUPABASE_JWKS_URL`: required in production for cryptographic Supabase access-token validation. See `docs/supabase_auth.md`.
 
 See `.env.example`, `docs/deployment.md`, and `docs/model_limitations.md` for production-readiness and model-boundary notes.
 

@@ -21,10 +21,13 @@ uvicorn contestiq_api.main:app --host 0.0.0.0 --port ${PORT:-8000}
 
 Production (`APP_ENV=production`) fails fast unless:
 - `ADMIN_API_KEY` is set (min 16 chars);
+- Supabase JWT verification has `SUPABASE_URL`, `SUPABASE_JWT_ISSUER`,
+  `SUPABASE_JWT_AUDIENCE`, and `SUPABASE_JWKS_URL`;
 - `BILLING_PROVIDER=stripe` also has `BILLING_API_KEY` + `BILLING_WEBHOOK_SECRET`.
 
 Full env reference: `.env.example`. Never put backend keys in Vercel — only
-`NEXT_PUBLIC_API_URL` belongs in the frontend.
+public `NEXT_PUBLIC_*` configuration belongs in the frontend. Supabase
+setup and auth rollback are documented in `docs/supabase_auth.md`.
 
 ## Health, metrics, traces
 

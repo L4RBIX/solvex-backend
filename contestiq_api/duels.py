@@ -1,15 +1,14 @@
 """Friend 1v1 duels by invite link (Phase G4 / G4.1).
 
-Invite-only private matches: same assigned CF problem, first to pass the
-shared custom test wins. No matchmaking, no Elo, no tournaments, no chat.
+Invite-only private matches: same assigned problem, first to pass every test
+in the server-owned shared test set wins. No matchmaking, no Elo, no
+tournaments, no chat.
 
-Judging reuses Judge0 via the Arena execute path. CF catalog problems do not
-store official tests, so judging is always JUDGING_MODE_CUSTOM (never
-"authoritative" — see the honest VERDICT_* constants). The (stdin,
-expected_output) pair from the FIRST submission in a duel is locked as the
-shared test for BOTH participants — a player cannot self-select their own
-expected output to win (see _lock_shared_test). Source code is hashed only —
-never returned.
+Judging reuses Judge0 via the Arena execute path. Only reviewed, versioned
+problem packs with SolveX-authored task content and private tests are eligible.
+The test set is snapshotted and hashed at match creation; participant payloads
+never define or alter it. This remains custom practice judging, never a claim
+of official Codeforces acceptance. Source code is hashed only — never returned.
 
 Security: every function here takes a real `user_id` (from a validated
 bearer token — see auth.require_user_subject), NEVER a caller-supplied
@@ -42,16 +41,16 @@ COUNTDOWN_SECONDS = 4
 DUEL_HINTS_MAX = 3
 # judging_at older than this is treated as a crashed judge run, not "judging".
 JUDGING_STALE_SECONDS = 90
+MAX_DUEL_TESTS = 25
+MAX_DUEL_TEST_BYTES = 64_000
 
-# Honest judging labels (hotfix): the CF catalog stores no official statements
-# or tests, so a duel can NEVER claim authoritative Codeforces correctness —
-# it is always judged against a shared custom test, locked from whichever
-# participant submits first. "authoritative" is reserved for a future
-# internal problem set with a real oracle; none exists today.
+# Honest judging labels: reviewed SolveX packs are custom practice tests, not
+# the official Codeforces test data.
 JUDGING_MODE_AUTHORITATIVE = "authoritative"
 JUDGING_MODE_CUSTOM = "custom_tests"
 
 VERDICT_NO_TESTS = "no_tests"
+VERDICT_NOT_EVALUATED = "not_evaluated"
 VERDICT_COMPILE_ERROR = "compile_error"
 VERDICT_RUNTIME_ERROR = "runtime_error"
 VERDICT_CUSTOM_PASSED = "custom_tests_passed"
@@ -65,8 +64,10 @@ _JUDGE_STATUS_TO_VERDICT = {
 }
 
 
-def _judge_status_to_verdict(judge_status: str | None) -> str:
+def _judge_status_to_verdict(judge_status: str | None, *, tests_available: bool = True) -> str:
     if judge_status is None:
+        return VERDICT_NOT_EVALUATED if tests_available else VERDICT_NO_TESTS
+    if judge_status == VERDICT_NO_TESTS:
         return VERDICT_NO_TESTS
     return _JUDGE_STATUS_TO_VERDICT.get(judge_status, VERDICT_CUSTOM_FAILED)
 
@@ -108,6 +109,153 @@ def _excerpt(text: str | None, limit: int = 400) -> str | None:
     return text[:limit] + "…"
 
 
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _normalize_judge_tests(value: Any) -> list[dict[str, str]]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list) or not 1 <= len(value) <= MAX_DUEL_TESTS:
+        return []
+    normalized: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            return []
+        stdin = item.get("input")
+        expected = item.get("expected_output")
+        if not isinstance(stdin, str) or not isinstance(expected, str) or not expected.strip():
+            return []
+        if len(stdin.encode("utf-8")) > MAX_DUEL_TEST_BYTES or len(expected.encode("utf-8")) > MAX_DUEL_TEST_BYTES:
+            return []
+        normalized.append({"input": stdin, "expected_output": expected})
+    return normalized
+
+
+def _normalize_sample_tests(value: Any) -> list[dict[str, str]]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list):
+        return []
+    samples: list[dict[str, str]] = []
+    for item in value[:10]:
+        if not isinstance(item, dict) or not isinstance(item.get("input"), str) or not isinstance(item.get("output"), str):
+            continue
+        sample = {"input": item["input"], "output": item["output"]}
+        if isinstance(item.get("note"), str):
+            sample["note"] = item["note"]
+        samples.append(sample)
+    return samples
+
+
+def _tests_hash(tests: list[dict[str, str]]) -> str:
+    return hashlib.sha256(_canonical_json(tests).encode("utf-8")).hexdigest()
+
+
+def _pack_has_complete_content(pack: dict[str, Any] | None) -> bool:
+    return bool(pack) and all(
+        isinstance(pack.get(key), str) and pack[key].strip()
+        for key in ("statement_summary", "input_format", "output_format", "constraints_text")
+    )
+
+
+def upsert_duel_problem_pack(pack: dict[str, Any]) -> bool:
+    """Internal/admin seed helper. A new test set must use a new pack/version."""
+    required_text = ("pack_id", "problem_id", "statement_summary", "input_format", "output_format", "constraints_text")
+    if any(not isinstance(pack.get(key), str) or not pack[key].strip() for key in required_text):
+        return False
+    tests = _normalize_judge_tests(pack.get("judge_tests"))
+    if not tests:
+        return False
+    samples = _normalize_sample_tests(pack.get("sample_tests"))
+    version = int(pack.get("version") or 0)
+    if version < 1:
+        return False
+    with store.connect() as conn:
+        exists = conn.execute("SELECT 1 FROM problems WHERE problem_key = ?", (pack["problem_id"],)).fetchone()
+        if exists is None:
+            return False
+        conn.execute(
+            "UPDATE duel_problem_packs SET active = 0 WHERE problem_id = ? AND pack_id != ?",
+            (pack["problem_id"], pack["pack_id"]),
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO duel_problem_packs (
+                pack_id, problem_id, version, statement_summary, input_format, output_format,
+                constraints_text, sample_tests, judge_tests, active, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            """,
+            (
+                pack["pack_id"], pack["problem_id"], version, pack["statement_summary"],
+                pack["input_format"], pack["output_format"], pack["constraints_text"],
+                _canonical_json(samples), _canonical_json(tests), store._now(),
+            ),
+        )
+        conn.execute("UPDATE duel_problem_packs SET active = 1 WHERE pack_id = ?", (pack["pack_id"],))
+    return True
+
+
+def seed_builtin_duel_problem_packs() -> int:
+    from contestiq_api.duel_problem_packs import BUILTIN_DUEL_PROBLEM_PACKS
+
+    seeded = 0
+    for pack in BUILTIN_DUEL_PROBLEM_PACKS:
+        with store.connect() as conn:
+            active = conn.execute(
+                "SELECT 1 FROM duel_problem_packs WHERE problem_id = ? AND active = 1",
+                (pack["problem_id"],),
+            ).fetchone()
+        if active is None and upsert_duel_problem_pack(pack):
+            seeded += 1
+    return seeded
+
+
+def _get_problem_pack(pack_id: str | None) -> dict[str, Any] | None:
+    if not pack_id:
+        return None
+    with store.connect() as conn:
+        row = conn.execute("SELECT * FROM duel_problem_packs WHERE pack_id = ?", (pack_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def _locked_tests(duel: dict[str, Any]) -> list[dict[str, str]]:
+    if duel.get("test_locked_by") != "server" or not duel.get("test_cases_json") or not duel.get("test_set_hash"):
+        return []
+    tests = _normalize_judge_tests(duel["test_cases_json"])
+    if not tests or not secrets.compare_digest(_tests_hash(tests), duel["test_set_hash"]):
+        return []
+    return tests
+
+
+def _require_locked_tests(duel: dict[str, Any]) -> list[dict[str, str]]:
+    tests = _locked_tests(duel)
+    if not tests:
+        raise APIError(
+            "DUEL_TESTS_UNAVAILABLE",
+            "This duel problem has no shared server-controlled tests. Create a new duel to receive an eligible problem.",
+            409,
+        )
+    return tests
+
+
+def _require_duel_ready_data(duel: dict[str, Any]) -> list[dict[str, str]]:
+    tests = _require_locked_tests(duel)
+    if not _pack_has_complete_content(_get_problem_pack(duel.get("problem_pack_id"))):
+        raise APIError(
+            "DUEL_CONTENT_UNAVAILABLE",
+            "This duel problem does not have complete task content. Create a new duel to receive an eligible problem.",
+            409,
+        )
+    return tests
+
+
 def _parse_iso(value: str | None) -> dt.datetime | None:
     if not value:
         return None
@@ -124,9 +272,14 @@ def _now_dt() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
 
-def _problem_public(problem: dict[str, Any] | None, problem_id: str, rating: int | None) -> dict[str, Any]:
+def _problem_public(
+    problem: dict[str, Any] | None,
+    problem_id: str,
+    rating: int | None,
+    pack: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if problem is None:
-        return {
+        public = {
             "problem_id": problem_id,
             "name": problem_id,
             "rating": rating,
@@ -135,26 +288,45 @@ def _problem_public(problem: dict[str, Any] | None, problem_id: str, rating: int
             "index": None,
             "url": None,
         }
-    tags = problem.get("tags") or "[]"
-    if isinstance(tags, str):
-        try:
-            tags = json.loads(tags)
-        except json.JSONDecodeError:
-            tags = []
-    contest_id = problem.get("contest_id")
-    index = problem.get("problem_index")
-    url = None
-    if contest_id and index:
-        url = f"https://codeforces.com/problemset/problem/{contest_id}/{index}"
-    return {
-        "problem_id": problem_id,
-        "name": problem.get("name") or problem_id,
-        "rating": problem.get("rating") if problem.get("rating") is not None else rating,
-        "tags": tags,
-        "contest_id": contest_id,
-        "index": index,
-        "url": url,
-    }
+    else:
+        tags = problem.get("tags") or "[]"
+        if isinstance(tags, str):
+            try:
+                tags = json.loads(tags)
+            except json.JSONDecodeError:
+                tags = []
+        contest_id = problem.get("contest_id")
+        index = problem.get("problem_index")
+        url = f"https://codeforces.com/problemset/problem/{contest_id}/{index}" if contest_id and index else None
+        public = {
+            "problem_id": problem_id,
+            "name": problem.get("name") or problem_id,
+            "rating": problem.get("rating") if problem.get("rating") is not None else rating,
+            "tags": tags,
+            "contest_id": contest_id,
+            "index": index,
+            "url": url,
+        }
+    public.update({
+        "statement_summary": pack.get("statement_summary") if pack else None,
+        "input_format": pack.get("input_format") if pack else None,
+        "output_format": pack.get("output_format") if pack else None,
+        "constraints": pack.get("constraints_text") if pack else None,
+        "sample_tests": _normalize_sample_tests(pack.get("sample_tests")) if pack else [],
+        "content_complete": bool(
+            pack
+            and pack.get("statement_summary")
+            and pack.get("input_format")
+            and pack.get("output_format")
+            and pack.get("constraints_text")
+        ),
+        "content_notice": (
+            "SolveX-authored summary for practice. Use the official Codeforces link for the original statement."
+            if pack else
+            "Full task content is unavailable in SolveX."
+        ),
+    })
+    return public
 
 
 def _creator_anchor_rating(handle: str | None) -> int:
@@ -197,7 +369,8 @@ def pick_problem(
     duel_id: str,
     creator_handle: str | None,
 ) -> dict[str, Any]:
-    """Deterministic problem pick seeded by duel_id from the mapped catalog."""
+    """Pick only catalog problems backed by a usable server-owned pack."""
+    seed_builtin_duel_problem_packs()
     cfg = MODES[mode]
     anchor = _creator_anchor_rating(creator_handle) + int(cfg["rating_offset"])
     window = int(cfg["rating_window"])
@@ -208,19 +381,27 @@ def pick_problem(
         rows = conn.execute(
             """
             SELECT p.problem_key, p.name, p.rating, p.tags, p.contest_id, p.problem_index,
+                   dpp.pack_id, dpp.version AS pack_version, dpp.statement_summary,
+                   dpp.input_format, dpp.output_format, dpp.constraints_text,
+                   dpp.sample_tests, dpp.judge_tests,
                    (SELECT skill_id FROM problem_skill_map m
                     WHERE m.problem_id = p.problem_key
                     ORDER BY m.is_primary DESC, m.weight DESC LIMIT 1) AS skill_id
             FROM problems p
+            JOIN duel_problem_packs dpp ON dpp.problem_id = p.problem_key AND dpp.active = 1
             WHERE p.rating IS NOT NULL
               AND EXISTS (SELECT 1 FROM problem_skill_map m WHERE m.problem_id = p.problem_key)
             ORDER BY p.problem_key
             """
         ).fetchall()
 
-    candidates = [dict(r) for r in rows if r["problem_key"] not in exclude]
+    usable = [
+        dict(r) for r in rows
+        if _normalize_judge_tests(r["judge_tests"]) and _pack_has_complete_content(dict(r))
+    ]
+    candidates = [r for r in usable if r["problem_key"] not in exclude]
     if not candidates:
-        candidates = [dict(r) for r in rows]
+        candidates = usable
 
     band = [c for c in candidates if c["rating"] is not None and lo <= int(c["rating"]) <= hi]
     if not band:
@@ -232,8 +413,8 @@ def pick_problem(
         band = candidates
     if not band:
         raise APIError(
-            "CATALOG_EMPTY",
-            "Problem catalog is empty — sync the problemset and rebuild the skill map first.",
+            "NO_JUDGEABLE_DUEL_PROBLEMS",
+            "No duel problem has a valid server-controlled test set and complete task content. Add or activate a reviewed duel problem pack before creating a match.",
             503,
         )
 
@@ -245,6 +426,8 @@ def pick_problem(
         "problem_rating": chosen.get("rating"),
         "skill_id": chosen.get("skill_id"),
         "problem": chosen,
+        "pack": chosen,
+        "tests": _normalize_judge_tests(chosen["judge_tests"]),
     }
 
 
@@ -290,6 +473,78 @@ def require_participant(duel_id: str, user_id: str) -> dict[str, Any]:
     return member
 
 
+def authorize_copilot_context(
+    user_id: str | None,
+    duel_id: str | None,
+    *,
+    source_code: str = "",
+    verify_post_match_source: bool = True,
+) -> str | None:
+    """Enforce the PvP AI boundary from trusted match/participant rows.
+
+    An authenticated caller cannot bypass the block by omitting or falsifying
+    duel_id: any server-side active match or ready waiting-room membership is
+    checked first. Explicit terminal context is allowed only for that
+    participant, and supplied code must match one of their own source hashes.
+    """
+    if user_id:
+        with store.connect() as conn:
+            blocked_rows = conn.execute(
+                """
+                SELECT d.*, p.ready_at AS caller_ready_at
+                FROM duel_matches d
+                JOIN duel_participants p ON p.duel_id = d.duel_id
+                WHERE p.user_id = ?
+                  AND (d.status = 'active' OR (d.status = 'waiting' AND p.ready_at IS NOT NULL))
+                """,
+                (user_id,),
+            ).fetchall()
+        for row in blocked_rows:
+            current = _maybe_expire(dict(row))
+            if current["status"] == ACTIVE or (current["status"] == WAITING and row["caller_ready_at"]):
+                raise APIError(
+                    "COPILOT_DISABLED_IN_DUEL",
+                    "Copilot is disabled during active PvP duels.",
+                    403,
+                )
+
+    if not duel_id:
+        return None
+    if not user_id:
+        raise APIError(
+            "COPILOT_DISABLED_IN_DUEL",
+            "Copilot is disabled during active PvP duels.",
+            403,
+        )
+
+    participant = is_participant(duel_id, user_id)
+    duel = get_duel(duel_id)
+    if participant is None or duel is None:
+        raise APIError("FORBIDDEN", "You are not a participant in this duel.", 403)
+    duel = _maybe_expire(duel)
+    if duel["status"] not in (COMPLETED, EXPIRED, CANCELLED):
+        raise APIError(
+            "COPILOT_DISABLED_IN_DUEL",
+            "Copilot is disabled during active PvP duels.",
+            403,
+        )
+
+    if verify_post_match_source and source_code.strip():
+        with store.connect() as conn:
+            own = conn.execute(
+                "SELECT 1 FROM duel_submissions"
+                " WHERE duel_id = ? AND participant_subject = ? AND source_hash = ? LIMIT 1",
+                (duel_id, participant["subject"], _hash_source(source_code)),
+            ).fetchone()
+        if own is None:
+            raise APIError(
+                "POST_MATCH_SOURCE_NOT_OWN",
+                "Post-match review can analyze only your own submitted code.",
+                403,
+            )
+    return "Post-match review"
+
+
 def _maybe_expire(duel: dict[str, Any]) -> dict[str, Any]:
     """Finalize active/waiting duels past expires_at (winner v2 or draw)."""
     if duel["status"] in (COMPLETED, EXPIRED, CANCELLED):
@@ -324,6 +579,24 @@ def _finalize_duel(duel_id: str, *, at_timeout: bool) -> bool:
     duel = get_duel(duel_id)
     if duel is None or duel["status"] in (COMPLETED, EXPIRED, CANCELLED):
         return False
+    if not _locked_tests(duel):
+        if not at_timeout:
+            return False
+        now = store._now()
+        with store.connect() as conn:
+            cursor = conn.execute(
+                "UPDATE duel_matches SET status = 'expired', completed_at = ?, winner_subject = NULL,"
+                " result_reason = 'judging_unavailable', winner_decided_at = ?"
+                " WHERE duel_id = ? AND status NOT IN ('completed', 'expired', 'cancelled')",
+                (now, now, duel_id),
+            )
+            if cursor.rowcount != 1:
+                return False
+            conn.execute(
+                "UPDATE duel_participants SET final_status = 'no_submission' WHERE duel_id = ?",
+                (duel_id,),
+            )
+        return True
     participants = list_participants(duel_id)
     accepted = [p for p in participants if p.get("accepted_at")]
 
@@ -402,6 +675,9 @@ def create_duel(
 
     duel_id = str(uuid.uuid4())
     picked = pick_problem(mode=mode, duel_id=duel_id, creator_handle=caller.get("handle"))
+    locked_tests = picked["tests"]
+    tests_json = _canonical_json(locked_tests)
+    tests_hash = _tests_hash(locked_tests)
     invite_code = secrets.token_urlsafe(12)
     now = store._now()
     # Waiting room expires in 24h; active duration starts on start().
@@ -416,13 +692,15 @@ def create_duel(
             """
             INSERT INTO duel_matches (
                 duel_id, creator_subject, creator_user_id, creator_handle, mode, status,
-                problem_id, problem_rating, skill_id, invite_code_hash, expires_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                problem_id, problem_rating, skill_id, invite_code_hash, expires_at, created_at,
+                problem_pack_id, test_cases_json, test_set_hash, test_locked_by, test_locked_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'server', ?)
             """,
             (
                 duel_id, caller["subject"], caller.get("user_id"), handle, mode, WAITING,
                 picked["problem_id"], picked["problem_rating"], picked["skill_id"],
-                _hash_code(invite_code), waiting_expires, now,
+                _hash_code(invite_code), waiting_expires, now, picked["pack"]["pack_id"],
+                tests_json, tests_hash, now,
             ),
         )
         conn.execute(
@@ -444,7 +722,7 @@ def create_duel(
         "duel_id": duel_id,
         "mode": mode,
         "status": WAITING,
-        "problem": _problem_public(problem, picked["problem_id"], picked["problem_rating"]),
+        "problem": _problem_public(problem, picked["problem_id"], picked["problem_rating"], picked["pack"]),
         "invite_code": invite_code,
         "expires_at": waiting_expires,
         "created_at": now,
@@ -462,16 +740,18 @@ def invite_preview(invite_code: str) -> dict[str, Any]:
     duel = _maybe_expire(dict(row))
     if duel["status"] in (COMPLETED, EXPIRED, CANCELLED):
         raise APIError("DUEL_CLOSED", "This duel is no longer joinable.", 410)
+    _require_duel_ready_data(duel)
 
     participants = list_participants(duel["duel_id"])
     creator = next((p for p in participants if p["role"] == ROLE_CREATOR), None)
     problem = store.get_problem(duel["problem_id"])
+    pack = _get_problem_pack(duel.get("problem_pack_id"))
     return {
         "duel_id": duel["duel_id"],
         "mode": duel["mode"],
         "status": duel["status"],
         "creator_display_name": creator["display_name"] if creator else "Creator",
-        "problem": _problem_public(problem, duel["problem_id"], duel.get("problem_rating")),
+        "problem": _problem_public(problem, duel["problem_id"], duel.get("problem_rating"), pack),
         "expires_at": duel["expires_at"],
         "participants_count": len(participants),
     }
@@ -488,6 +768,7 @@ def join_duel(caller: dict[str, Any], invite_code: str, display_name: str | None
     duel = _maybe_expire(dict(row))
     if duel["status"] != WAITING:
         raise APIError("DUEL_NOT_JOINABLE", "This duel cannot be joined right now.", 409)
+    _require_duel_ready_data(duel)
 
     existing = is_participant(duel["duel_id"], caller["user_id"])
     if existing is not None:
@@ -528,6 +809,7 @@ def _activate(duel_id: str) -> None:
     duel = get_duel(duel_id)
     if duel is None or duel["status"] != WAITING:
         return
+    _require_duel_ready_data(duel)
     cfg = MODES[duel["mode"]]
     now = _now_dt()
     starts = now + dt.timedelta(seconds=COUNTDOWN_SECONDS)
@@ -685,31 +967,6 @@ def use_hint(duel_id: str, user_id: str) -> dict[str, Any]:
     }
 
 
-def _lock_shared_test(duel_id: str, subject: str, stdin: str, expected_output: str) -> tuple[str, str]:
-    """Lock the duel's shared test on first submission, or return the already-
-    locked test. Every submission — by either participant — is judged against
-    this SAME (stdin, expected_output) pair, so no one can pick their own
-    expected output for a ranked win (hotfix for a self-selection exploit).
-    """
-    duel = get_duel(duel_id)
-    if duel and duel.get("test_expected_output"):
-        return duel.get("test_input") or "", duel["test_expected_output"]
-
-    now = store._now()
-    with store.connect() as conn:
-        cursor = conn.execute(
-            "UPDATE duel_matches SET test_input = ?, test_expected_output = ?,"
-            " test_locked_by = ?, test_locked_at = ?"
-            " WHERE duel_id = ? AND test_expected_output IS NULL",
-            (stdin, expected_output, subject, now, duel_id),
-        )
-    if cursor.rowcount == 1:
-        return stdin, expected_output
-    # Lost a concurrent race to lock — use whichever submission won it.
-    winner = get_duel(duel_id) or {}
-    return winner.get("test_input") or "", winner.get("test_expected_output") or expected_output
-
-
 def _latest_judge_statuses(duel_id: str) -> dict[str, str]:
     with store.connect() as conn:
         rows = conn.execute(
@@ -729,8 +986,6 @@ async def submit_solution(
     *,
     language: str,
     source_code: str,
-    stdin: str = "",
-    expected_output: str | None = None,
 ) -> dict[str, Any]:
     participant = require_participant(duel_id, user_id)
     duel = get_duel(duel_id)
@@ -746,22 +1001,22 @@ async def submit_solution(
         raise APIError("UNSUPPORTED_LANGUAGE", "Supported languages: cpp17, python3.", 422)
     if not source_code.strip():
         raise APIError("EMPTY_SOURCE", "source_code cannot be empty.", 422)
-    # Without an expected output, any program that merely runs would count as
-    # accepted — no basis for a duel verdict. (CF catalog stores no official
-    # tests; this stays custom-test judging and the UI says so.)
-    if expected_output is None or not expected_output.strip():
-        raise APIError(
-            "EXPECTED_OUTPUT_REQUIRED",
-            "Duel judging compares your program's output against an expected output — provide a test with its expected output.",
-            422,
-        )
-
-    # Server-controlled shared test set: whoever submits first in the duel
-    # locks (stdin, expected_output) for BOTH participants. Any test a later
-    # submission supplies — including the second participant's own guess —
-    # is ignored for judging, so no one can self-select their own expected
-    # output to win.
-    judge_stdin, judge_expected = _lock_shared_test(duel_id, participant["subject"], stdin, expected_output)
+    judge_tests = _locked_tests(duel)
+    if not judge_tests:
+        return {
+            "submission_id": None,
+            "judge_status": VERDICT_NO_TESTS,
+            "verdict": VERDICT_NO_TESTS,
+            "judging_mode": JUDGING_MODE_CUSTOM,
+            "passed": False,
+            "runtime_ms": None,
+            "memory_kb": None,
+            "message": (
+                "Judging unavailable. This duel problem has no shared server-controlled tests. "
+                "Your solution was not evaluated."
+            ),
+            "duel": public_detail(duel_id, user_id),
+        }
 
     from contestiq_api.judge0_client import run_submission
     from contestiq_api.settings import get_settings
@@ -775,24 +1030,35 @@ async def submit_solution(
             "UPDATE duel_participants SET judging_at = ?, last_seen_at = ? WHERE duel_id = ? AND subject = ?",
             (store._now(), store._now(), duel_id, participant["subject"]),
         )
+    results: list[dict[str, Any]] = []
     try:
-        result = await run_submission(
-            base_url=settings.judge0_base_url,
-            api_key=settings.judge0_api_key,
-            api_host=settings.judge0_api_host,
-            language_id=_LANGUAGE_IDS[language],
-            source_code=source_code,
-            stdin=judge_stdin,
-            expected_output=judge_expected,
-        )
+        for test in judge_tests:
+            result = await run_submission(
+                base_url=settings.judge0_base_url,
+                api_key=settings.judge0_api_key,
+                api_host=settings.judge0_api_host,
+                language_id=_LANGUAGE_IDS[language],
+                source_code=source_code,
+                stdin=test["input"],
+                expected_output=test["expected_output"],
+            )
+            results.append(result)
+            if not (bool(result.get("passed")) or result.get("status") == "accepted"):
+                break
     finally:
         with store.connect() as conn:
             conn.execute(
                 "UPDATE duel_participants SET judging_at = NULL WHERE duel_id = ? AND subject = ?",
                 (duel_id, participant["subject"]),
             )
-    passed = bool(result.get("passed")) or result.get("status") == "accepted"
-    verdict = _judge_status_to_verdict(result.get("status"))
+    result = results[-1]
+    passed = len(results) == len(judge_tests) and all(
+        bool(item.get("passed")) or item.get("status") == "accepted" for item in results
+    )
+    judge_status = "accepted" if passed else (result.get("status") or "error")
+    verdict = _judge_status_to_verdict(judge_status)
+    runtime_ms = sum(int(item.get("time_ms") or 0) for item in results) or None
+    memory_kb = max((int(item.get("memory_kb") or 0) for item in results), default=0) or None
     submission_id = str(uuid.uuid4())
     now = store._now()
     with store.connect() as conn:
@@ -806,9 +1072,9 @@ async def submit_solution(
             """,
             (
                 submission_id, duel_id, participant["subject"], language, _hash_source(source_code),
-                result.get("status") or "error", 1 if passed else 0,
+                judge_status, 1 if passed else 0,
                 _excerpt(result.get("stdout")), _excerpt(result.get("stderr") or result.get("compile_output")),
-                now, now, result.get("time_ms"), result.get("memory_kb"),
+                now, now, runtime_ms, memory_kb,
             ),
         )
         if passed and not participant.get("accepted_at"):
@@ -831,13 +1097,13 @@ async def submit_solution(
 
     return {
         "submission_id": submission_id,
-        "judge_status": result.get("status"),
+        "judge_status": judge_status,
         "verdict": verdict,
         "judging_mode": JUDGING_MODE_CUSTOM,
         "passed": passed,
-        "runtime_ms": result.get("time_ms"),
-        "memory_kb": result.get("memory_kb"),
-        "message": result.get("message") or result.get("status"),
+        "runtime_ms": runtime_ms,
+        "memory_kb": memory_kb,
+        "message": "Shared server tests passed." if passed else (result.get("message") or judge_status),
         "duel": public_detail(duel_id, user_id),
     }
 
@@ -882,6 +1148,9 @@ def public_detail(duel_id: str, user_id: str) -> dict[str, Any]:
     duel = _maybe_expire(duel)
     participants = list_participants(duel_id)
     problem = store.get_problem(duel["problem_id"])
+    pack = _get_problem_pack(duel.get("problem_pack_id"))
+    tests_available = bool(_locked_tests(duel))
+    effective_winner = duel.get("winner_subject") if tests_available else None
     viewer = is_participant(duel_id, user_id)
 
     with store.connect() as conn:
@@ -899,16 +1168,18 @@ def public_detail(duel_id: str, user_id: str) -> dict[str, Any]:
         "duel_id": duel["duel_id"],
         "mode": duel["mode"],
         "status": duel["status"],
-        "problem": _problem_public(problem, duel["problem_id"], duel.get("problem_rating")),
+        "problem": _problem_public(problem, duel["problem_id"], duel.get("problem_rating"), pack),
         "skill_id": duel.get("skill_id"),
         "starts_at": duel.get("starts_at"),
         "expires_at": duel["expires_at"],
         "created_at": duel["created_at"],
         "completed_at": duel.get("completed_at"),
-        "result_reason": duel.get("result_reason"),
+        "result_reason": duel.get("result_reason") if tests_available else "judging_unavailable",
         # Honest judging labels (hotfix): never claim official CF correctness.
         "judging_mode": JUDGING_MODE_CUSTOM,
-        "test_locked": bool(duel.get("test_expected_output")),
+        "test_locked": tests_available,
+        "judging_available": tests_available,
+        "infrastructure_verdict": None if tests_available else VERDICT_NO_TESTS,
         "viewer_role": viewer["role"] if viewer else None,
         "participants": [
             {
@@ -916,7 +1187,9 @@ def public_detail(duel_id: str, user_id: str) -> dict[str, Any]:
                 "handle": p.get("handle"),
                 "role": p["role"],
                 "final_status": p["final_status"],
-                "verdict": _judge_status_to_verdict(latest_statuses.get(p["subject"])),
+                "verdict": _judge_status_to_verdict(
+                    latest_statuses.get(p["subject"]), tests_available=tests_available
+                ),
                 "ready": bool(p.get("ready_at")),
                 "accepted_at": p.get("accepted_at"),
                 "joined_at": p["joined_at"],
@@ -924,7 +1197,7 @@ def public_detail(duel_id: str, user_id: str) -> dict[str, Any]:
                 "hint_count": int(p.get("hint_count") or 0),
                 "wrong_attempts": int(p.get("wrong_attempts") or 0),
                 "is_viewer": viewer is not None and p["subject"] == viewer["subject"],
-                "is_winner": duel.get("winner_subject") == p["subject"],
+                "is_winner": effective_winner == p["subject"],
             }
             for p in participants
         ],
@@ -950,8 +1223,8 @@ def duel_state(duel_id: str, user_id: str) -> dict[str, Any]:
     """Lightweight participant-only polling payload for the live room + Arena.
 
     Contains everything the room/Arena needs each 1–2s tick and nothing
-    sensitive: no source code, no invite hash, no Judge0 config, no hidden
-    tests (the catalog has none). Also bumps the viewer's last_seen_at.
+    sensitive: no source code, invite hash, Judge0 config, hidden test input,
+    or expected output. Also bumps the viewer's last_seen_at.
     """
     viewer = require_participant(duel_id, user_id)
     duel = get_duel(duel_id)
@@ -975,8 +1248,12 @@ def duel_state(duel_id: str, user_id: str) -> dict[str, Any]:
 
     participants = list_participants(duel_id)
     problem = store.get_problem(duel["problem_id"])
-    winner_subject = duel.get("winner_subject")
+    pack = _get_problem_pack(duel.get("problem_pack_id"))
+    stored_winner_subject = duel.get("winner_subject")
     latest_statuses = _latest_judge_statuses(duel_id)
+    locked_tests = _locked_tests(duel)
+    tests_available = bool(locked_tests)
+    winner_subject = stored_winner_subject if tests_available else None
 
     participant_states = [
         {
@@ -997,13 +1274,14 @@ def duel_state(duel_id: str, user_id: str) -> dict[str, Any]:
             "seconds_to_accept": _seconds_to_accept(duel, p),
             "final_status": p["final_status"],
             # Honest per-participant verdict — see VERDICT_* constants.
-            "verdict": _judge_status_to_verdict(latest_statuses.get(p["subject"])),
+            "verdict": _judge_status_to_verdict(
+                latest_statuses.get(p["subject"]), tests_available=tests_available
+            ),
             "is_winner": winner_subject == p["subject"],
         }
         for p in participants
     ]
 
-    test_locked = bool(duel.get("test_expected_output"))
     state: dict[str, Any] = {
         "duel_id": duel_id,
         "mode": duel["mode"],
@@ -1016,23 +1294,20 @@ def duel_state(duel_id: str, user_id: str) -> dict[str, Any]:
         "arena_path": arena_path(duel_id),
         "duration_minutes": int(MODES[duel["mode"]]["duration_minutes"]),
         "hints_max": DUEL_HINTS_MAX,
-        # Honest judging labels (hotfix): the CF catalog stores no official
-        # tests, so this can never claim authoritative Codeforces correctness.
-        # Judging is against ONE shared test locked from the first submission
-        # — the same test for both participants (no self-selected expected
-        # output). Not official; exposing it is safe (nothing hidden here).
         "judging_mode": JUDGING_MODE_CUSTOM,
         "judging_note": (
-            "Practice duel: judged against a shared custom test locked from the first "
-            "submission — not official Codeforces tests."
+            "Practice duel: judged against the same locked server-controlled tests for both players; "
+            "this does not claim official Codeforces acceptance."
+            if tests_available else
+            "Judging unavailable. This duel problem has no shared server-controlled tests."
         ),
-        "test_locked": test_locked,
-        "shared_test": (
-            {"input": duel.get("test_input") or "", "expected_output": duel.get("test_expected_output")}
-            if test_locked
-            else None
-        ),
-        "problem": _problem_public(problem, duel["problem_id"], duel.get("problem_rating")),
+        "test_locked": tests_available,
+        "judging_available": tests_available,
+        "infrastructure_verdict": None if tests_available else VERDICT_NO_TESTS,
+        # Compatibility field only. Hidden inputs and expected outputs are
+        # never exposed to either participant.
+        "shared_test": None,
+        "problem": _problem_public(problem, duel["problem_id"], duel.get("problem_rating"), pack),
         "skill_id": duel.get("skill_id"),
         "participants": participant_states,
         "result": None,
@@ -1046,12 +1321,12 @@ def duel_state(duel_id: str, user_id: str) -> dict[str, Any]:
         state["result"] = {
             "status": duel["status"],
             "winner_display_name": winner_state["display_name"] if winner_state else None,
-            "result_reason": duel.get("result_reason"),
+            "result_reason": duel.get("result_reason") if tests_available else "judging_unavailable",
             "completed_at": duel.get("completed_at"),
             "viewer_won": viewer_won,
             "is_draw": is_draw,
             # Mirrors gamification XP_RULES: duel_completed 10, duel_won +15.
-            "xp_awarded": (10 + (15 if viewer_won else 0)) if duel["status"] == COMPLETED else 0,
+            "xp_awarded": (10 + (15 if viewer_won else 0)) if duel["status"] == COMPLETED and tests_available else 0,
         }
     return state
 
@@ -1064,20 +1339,22 @@ def result_view(duel_id: str, user_id: str) -> dict[str, Any]:
     if duel["status"] not in (COMPLETED, EXPIRED):
         raise APIError("DUEL_NOT_FINISHED", "Duel result is not ready yet.", 409)
     winner = next((p for p in detail["participants"] if p["is_winner"]), None)
+    tests_available = bool(detail.get("judging_available"))
     viewer_won = bool(
-        duel.get("winner_subject")
+        tests_available
+        and duel.get("winner_subject")
         and any(p["is_viewer"] and p["is_winner"] for p in detail["participants"])
     )
     return {
         "duel_id": duel_id,
         "status": duel["status"],
         "winner_display_name": winner["display_name"] if winner else None,
-        "result_reason": duel.get("result_reason"),
+        "result_reason": duel.get("result_reason") if tests_available else "judging_unavailable",
         "completed_at": duel.get("completed_at"),
         "judging_mode": JUDGING_MODE_CUSTOM,
         "participants": detail["participants"],
         "problem": detail["problem"],
         "viewer_won": viewer_won,
-        "is_draw": duel.get("winner_subject") is None,
-        "xp_awarded": (10 + (15 if viewer_won else 0)) if duel["status"] == COMPLETED else 0,
+        "is_draw": not tests_available or duel.get("winner_subject") is None,
+        "xp_awarded": (10 + (15 if viewer_won else 0)) if duel["status"] == COMPLETED and tests_available else 0,
     }

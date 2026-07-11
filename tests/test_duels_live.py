@@ -58,6 +58,15 @@ def catalog():
         })
     store.save_problemset_snapshot({"problems": problems, "problemStatistics": []})
     taxonomy.build_problem_skill_map()
+    for problem in problems:
+        key = f"{problem['contestId']}{problem['index']}"
+        assert duels.upsert_duel_problem_pack({
+            "pack_id": f"test-{key}-v1", "problem_id": key, "version": 1,
+            "statement_summary": "Print one for the shared test.", "input_format": "No input.",
+            "output_format": "Print 1.", "constraints_text": "No input values.",
+            "sample_tests": [{"input": "", "output": "1\n"}],
+            "judge_tests": [{"input": "", "expected_output": "1\n"}],
+        })
     return problems
 
 
@@ -450,17 +459,21 @@ def test_completion_events_emitted_exactly_once(client, catalog, user_a, user_b)
     assert len(_events(user_b, "duel_won")) == 0
 
 
-def test_submit_requires_expected_output(client, catalog, user_a, user_b):
-    """Without an expected output any running program would count as accepted —
-    that is no basis for a duel verdict, so the API refuses it."""
+def test_submit_uses_server_tests_without_player_expected_output(client, catalog, user_a, user_b):
     created = _seed_active(client, user_a, user_b)
-    response = client.post(
-        f"/api/v1/duels/{created['duel_id']}/submit",
-        json={"language": "python3", "source_code": "print(1)", "stdin": ""},
-        headers=bearer(user_a),
-    )
-    assert response.status_code == 422
-    assert response.json()["error_code"] == "EXPECTED_OUTPUT_REQUIRED"
+    with patch("contestiq_api.judge0_client.run_submission", new_callable=AsyncMock, return_value=ACCEPTED) as run:
+        with patch("contestiq_api.settings.get_settings") as gs:
+            gs.return_value.judge0_base_url = "https://judge0.test"
+            gs.return_value.judge0_api_key = ""
+            gs.return_value.judge0_api_host = ""
+            response = client.post(
+                f"/api/v1/duels/{created['duel_id']}/submit",
+                json={"language": "python3", "source_code": "print(1)"},
+                headers=bearer(user_a),
+            )
+    assert response.status_code == 200
+    assert response.json()["passed"] is True
+    assert run.call_args.kwargs["expected_output"] == "1\n"
 
 
 def test_submit_requires_auth(client, catalog, user_a, user_b):

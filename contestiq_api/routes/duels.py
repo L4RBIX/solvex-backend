@@ -47,8 +47,6 @@ class JoinDuelRequest(BaseModel):
 class SubmitDuelRequest(BaseModel):
     language: str = Field(pattern="^(cpp17|python3)$")
     source_code: str = Field(min_length=1, max_length=100_000)
-    stdin: str = Field(default="", max_length=64_000)
-    expected_output: str | None = Field(default=None, max_length=64_000)
 
 
 @router.post("")
@@ -187,8 +185,6 @@ async def submit_duel(
             caller["user_id"],
             language=payload.language,
             source_code=payload.source_code,
-            stdin=payload.stdin,
-            expected_output=payload.expected_output,
         )
     except Exception:
         finish(ok=False)

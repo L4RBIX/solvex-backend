@@ -256,6 +256,10 @@ def test_production_stripe_requires_webhook_secret(monkeypatch):
 
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("ADMIN_API_KEY", "prod-admin-key-0123456789")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_JWT_ISSUER", "https://example.supabase.co/auth/v1")
+    monkeypatch.setenv("SUPABASE_JWT_AUDIENCE", "authenticated")
+    monkeypatch.setenv("SUPABASE_JWKS_URL", "https://example.supabase.co/auth/v1/.well-known/jwks.json")
     monkeypatch.setenv("BILLING_PROVIDER", "stripe")
     monkeypatch.delenv("BILLING_API_KEY", raising=False)
     monkeypatch.delenv("BILLING_WEBHOOK_SECRET", raising=False)

@@ -176,6 +176,10 @@ def test_custom_cors_origins_parse(monkeypatch):
 def test_production_settings_defaults(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("ADMIN_API_KEY", "prod-admin-key-0123456789")  # production requires it (Phase 09)
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_JWT_ISSUER", "https://example.supabase.co/auth/v1")
+    monkeypatch.setenv("SUPABASE_JWT_AUDIENCE", "authenticated")
+    monkeypatch.setenv("SUPABASE_JWKS_URL", "https://example.supabase.co/auth/v1/.well-known/jwks.json")
     monkeypatch.delenv("ENABLE_DEBUG_ENDPOINT", raising=False)
     monkeypatch.delenv("RATE_LIMIT_ANALYZE_SECONDS", raising=False)
     import contestiq_api.settings as settings
