@@ -76,11 +76,24 @@ def search_users(query: str, limit: int = 20) -> list[dict[str, Any]]:
 
 
 def current_user(request: Request) -> dict[str, Any] | None:
-    """Resolve the optional bearer token; None = anonymous (free plan)."""
+    """Resolve a verified bearer token; None means an anonymous request.
+
+    JWT-shaped credentials are always verified as Supabase JWTs and never
+    fall back to the legacy token table. Opaque paid-beta tokens remain
+    available only outside production so the existing test/dev workflows can
+    migrate without weakening production authentication.
+    """
     header = request.headers.get("Authorization", "")
     if not header.lower().startswith("bearer "):
         return None
-    user = get_user_by_token(header[7:].strip())
+    token = header[7:].strip()
+    if token.count(".") == 2:
+        from contestiq_api.supabase_auth import authenticate
+
+        return authenticate(token)
+    if get_settings().app_env == "production":
+        raise APIError("INVALID_TOKEN", "The provided access token is not valid.", 401)
+    user = get_user_by_token(token)
     if user is None:
         raise APIError("INVALID_TOKEN", "The provided API token is not valid.", 401)
     return user

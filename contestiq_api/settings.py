@@ -112,6 +112,11 @@ class Settings:
     # Supabase (optional — copilot works without it, messages just won't persist)
     supabase_url: str = ""
     supabase_service_key: str = ""
+    # Supabase Auth JWT verification. The backend uses public JWKS only; a
+    # service-role key is neither required nor accepted for user identity.
+    supabase_jwt_issuer: str = ""
+    supabase_jwt_audience: str = ""
+    supabase_jwks_url: str = ""
     # Coach Memory: set to True to use DeepSeek for AI-generated profile summaries
     # (costs tokens — disabled by default; deterministic summaries are used instead)
     enable_ai_profile_summary: bool = False
@@ -149,6 +154,16 @@ def validate_settings(settings: Settings) -> Settings:
     if settings.app_env == "production":
         if not settings.admin_api_key or len(settings.admin_api_key) < 16:
             raise SettingsError("Production requires ADMIN_API_KEY (min 16 chars) for admin endpoints.")
+        if not (
+            settings.supabase_url
+            and settings.supabase_jwt_issuer
+            and settings.supabase_jwt_audience
+            and settings.supabase_jwks_url
+        ):
+            raise SettingsError(
+                "Production requires SUPABASE_URL, SUPABASE_JWT_ISSUER, "
+                "SUPABASE_JWT_AUDIENCE, and SUPABASE_JWKS_URL."
+            )
         if settings.billing_provider == "stripe" and not (settings.billing_api_key and settings.billing_webhook_secret):
             raise SettingsError("BILLING_PROVIDER=stripe requires BILLING_API_KEY and BILLING_WEBHOOK_SECRET.")
     return settings
@@ -186,6 +201,9 @@ def get_settings() -> Settings:
         deepseek_base_url=(os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").rstrip("/"),
         supabase_url=(os.getenv("SUPABASE_URL") or "").rstrip("/"),
         supabase_service_key=os.getenv("SUPABASE_SERVICE_KEY") or "",
+        supabase_jwt_issuer=(os.getenv("SUPABASE_JWT_ISSUER") or "").rstrip("/"),
+        supabase_jwt_audience=(os.getenv("SUPABASE_JWT_AUDIENCE") or "").strip(),
+        supabase_jwks_url=(os.getenv("SUPABASE_JWKS_URL") or "").strip(),
         enable_ai_profile_summary=_parse_bool(os.getenv("ENABLE_AI_PROFILE_SUMMARY"), False),
         database_path=(os.getenv("DATABASE_PATH") or "api_cache/backend_jobs.db").strip(),
         codeforces_rate_limit_seconds=_parse_float(os.getenv("CODEFORCES_RATE_LIMIT_SECONDS"), 2.0),
