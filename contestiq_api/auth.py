@@ -63,6 +63,25 @@ def get_user_by_handle(handle: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def get_user_id_by_email(email: str) -> str | None:
+    """Resolve an internal user_id from an email, preferring the verified
+    Supabase mapping (auth_identities) over the free-text `users.email`
+    column so an admin premium grant keys off a cryptographically confirmed
+    identity whenever one exists."""
+    normalized = email.strip().lower()
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM auth_identities WHERE LOWER(email) = ? ORDER BY updated_at DESC LIMIT 1",
+            (normalized,),
+        ).fetchone()
+        if row is None:
+            row = conn.execute(
+                "SELECT user_id FROM users WHERE LOWER(COALESCE(email,'')) = ? ORDER BY created_at DESC LIMIT 1",
+                (normalized,),
+            ).fetchone()
+    return row["user_id"] if row else None
+
+
 def search_users(query: str, limit: int = 20) -> list[dict[str, Any]]:
     like = f"%{query.strip().lower()}%"
     with store.connect() as conn:

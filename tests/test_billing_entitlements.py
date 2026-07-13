@@ -177,6 +177,102 @@ def test_expired_grant_does_not_entitle(client):
     assert me["plan"] == "free"
 
 
+# ─── Beta/demo premium grant by identifier (handle/email lookup) ────────────
+
+
+def test_admin_can_grant_premium_by_user_id(client):
+    user = create_user(client)
+    grant = client.post("/api/v1/admin/premium/grant",
+                        json={"user_id": user["user_id"], "plan": "premium_student"},
+                        headers=admin_headers())
+    assert grant.status_code == 200
+    assert grant.json()["user_id"] == user["user_id"]
+    me = client.get("/api/v1/me/entitlements", headers=bearer(user)).json()
+    assert me["plan"] == "premium_student"
+
+
+def test_admin_can_grant_premium_by_verified_handle(client):
+    user = create_user(client)
+    bind = client.post("/api/v1/admin/handles/bind",
+                       json={"user_id": user["user_id"], "handle": "beta-coder"},
+                       headers=admin_headers())
+    assert bind.status_code == 200
+
+    grant = client.post("/api/v1/admin/premium/grant",
+                        json={"handle": "beta-coder", "plan": "premium_student"},
+                        headers=admin_headers())
+    assert grant.status_code == 200
+    assert grant.json()["user_id"] == user["user_id"]
+    me = client.get("/api/v1/me/entitlements", headers=bearer(user)).json()
+    assert me["plan"] == "premium_student"
+
+
+def test_admin_grant_by_unverified_handle_fails_closed(client):
+    create_user(client)  # some other unrelated user exists
+    grant = client.post("/api/v1/admin/premium/grant",
+                        json={"handle": "nobody-verified-this", "plan": "premium_student"},
+                        headers=admin_headers())
+    assert grant.status_code == 404
+    assert grant.json()["error_code"] == "HANDLE_NOT_VERIFIED"
+
+
+def test_admin_can_grant_premium_by_email(client):
+    created = client.post("/api/v1/admin/users", json={"email": "founder-beta@example.com", "role": "user"},
+                          headers=admin_headers())
+    user = created.json()
+    grant = client.post("/api/v1/admin/premium/grant",
+                        json={"email": "founder-beta@example.com", "plan": "premium_student"},
+                        headers=admin_headers())
+    assert grant.status_code == 200
+    assert grant.json()["user_id"] == user["user_id"]
+    me = client.get("/api/v1/me/entitlements", headers=bearer(user)).json()
+    assert me["plan"] == "premium_student"
+
+
+def test_admin_grant_by_unknown_email_fails_closed(client):
+    grant = client.post("/api/v1/admin/premium/grant",
+                        json={"email": "nobody@example.com", "plan": "premium_student"},
+                        headers=admin_headers())
+    assert grant.status_code == 404
+    assert grant.json()["error_code"] == "EMAIL_NOT_FOUND"
+
+
+def test_admin_grant_by_identifier_requires_exactly_one(client):
+    user = create_user(client)
+    none_provided = client.post("/api/v1/admin/premium/grant", json={"plan": "premium_student"},
+                                headers=admin_headers())
+    assert none_provided.status_code == 422
+
+    both_provided = client.post(
+        "/api/v1/admin/premium/grant",
+        json={"user_id": user["user_id"], "handle": "beta-coder", "plan": "premium_student"},
+        headers=admin_headers(),
+    )
+    assert both_provided.status_code == 422
+
+
+def test_non_admin_cannot_grant_premium_by_identifier(client):
+    user = create_user(client)
+    forged = client.post("/api/v1/admin/premium/grant",
+                         json={"user_id": user["user_id"], "plan": "premium_student"},
+                         headers=bearer(user))
+    assert forged.status_code == 403
+    no_auth = client.post("/api/v1/admin/premium/grant", json={"user_id": user["user_id"], "plan": "premium_student"})
+    assert no_auth.status_code == 403
+    me = client.get("/api/v1/me/entitlements", headers=bearer(user)).json()
+    assert me["plan"] == "free"
+
+
+def test_premium_grant_by_identifier_is_audited(client):
+    user = create_user(client)
+    client.post("/api/v1/admin/premium/grant",
+               json={"user_id": user["user_id"], "plan": "premium_student"},
+               headers=admin_headers())
+    log = client.get("/api/v1/admin/audit-log", headers=admin_headers()).json()["entries"]
+    entry = next(e for e in log if e["action"] == "grant_entitlement" and e["target"] == user["user_id"])
+    assert entry["details"]["resolved_via"] == "user_id"
+
+
 # ─── Billing / webhooks ──────────────────────────────────────────────────────
 
 

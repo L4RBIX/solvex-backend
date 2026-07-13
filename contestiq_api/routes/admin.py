@@ -28,6 +28,15 @@ class GrantRequest(BaseModel):
     reference: str | None = None
 
 
+class GrantByIdentifierRequest(BaseModel):
+    user_id: str | None = None
+    handle: str | None = None
+    email: str | None = None
+    plan: str
+    expires_at: str | None = None
+    reference: str | None = None
+
+
 class RevokeRequest(BaseModel):
     plan: str
 
@@ -86,6 +95,50 @@ def grant(user_id: str, payload: GrantRequest, admin: dict[str, Any] = Depends(a
         reference=payload.reference, expires_at=payload.expires_at,
     )
     auth.audit(admin["actor"], "grant_entitlement", user_id, {"plan": payload.plan, "expires_at": payload.expires_at})
+    return result
+
+
+@router.post("/premium/grant")
+def grant_by_identifier(payload: GrantByIdentifierRequest, admin: dict[str, Any] = Depends(auth.require_admin)):
+    """Beta/demo-friendly premium grant that resolves the internal user_id
+    from whichever identifier the founder has on hand — an internal user_id,
+    a *verified* Codeforces handle (handle_owners, never the free-text
+    users.handle column), or the email on a Supabase-linked account
+    (auth_identities). Exactly one identifier is required; the entitlement
+    itself is always keyed to the resolved internal user_id, never the
+    identifier used to find it."""
+    provided = [name for name, value in (("user_id", payload.user_id), ("handle", payload.handle), ("email", payload.email)) if value]
+    if len(provided) != 1:
+        raise APIError("INVALID_IDENTIFIER", "Provide exactly one of user_id, handle, or email.", 422)
+
+    if payload.user_id:
+        user_id = payload.user_id
+        if auth.get_user(user_id) is None:
+            raise APIError("USER_NOT_FOUND", f"No user found with id {user_id}.", 404)
+        identifier_kind = "user_id"
+    elif payload.handle:
+        user_id = handles.owner_user_id_for_handle(payload.handle)
+        if user_id is None:
+            raise APIError(
+                "HANDLE_NOT_VERIFIED",
+                f"No SolveX account has verified ownership of '{payload.handle}'.",
+                404,
+            )
+        identifier_kind = "handle"
+    else:
+        user_id = auth.get_user_id_by_email(payload.email)  # type: ignore[arg-type]
+        if user_id is None:
+            raise APIError("EMAIL_NOT_FOUND", f"No SolveX account found for email {payload.email}.", 404)
+        identifier_kind = "email"
+
+    result = entitlements.grant_entitlement(
+        user_id, payload.plan, source="manual", granted_by=admin["actor"],
+        reference=payload.reference, expires_at=payload.expires_at,
+    )
+    auth.audit(admin["actor"], "grant_entitlement", user_id, {
+        "plan": payload.plan, "expires_at": payload.expires_at,
+        "resolved_via": identifier_kind,
+    })
     return result
 
 
