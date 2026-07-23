@@ -312,6 +312,14 @@ def legacy_analysis(user: dict[str, Any], submissions: list[dict[str, Any]]) -> 
                     "day": 6,
                     "focus": "Mixed Practice",
                     "problemName": prob["name"] if prob else None,
+                    **(
+                        {
+                            "contestId": prob["contestId"],
+                            "index": prob["index"],
+                        }
+                        if prob and prob.get("contestId") and prob.get("index")
+                        else {}
+                    ),
                     "rating": prob["rating"] if prob else comfort_sweet,
                     "reason": "Cross-tag practice to consolidate patterns",
                     "tagColor": DEFAULT_COLOR,
@@ -327,6 +335,14 @@ def legacy_analysis(user: dict[str, Any], submissions: list[dict[str, Any]]) -> 
                 "day": day,
                 "focus": _capitalize(tag),
                 "problemName": prob["name"] if prob else None,
+                **(
+                    {
+                        "contestId": prob["contestId"],
+                        "index": prob["index"],
+                    }
+                    if prob and prob.get("contestId") and prob.get("index")
+                    else {}
+                ),
                 "rating": prob["rating"] if prob else comfort_sweet,
                 "reason": area["issue"] if area else "Friction area",
                 "tagColor": _tag_color(tag),
