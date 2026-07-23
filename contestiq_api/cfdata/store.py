@@ -1272,6 +1272,27 @@ def get_problem(problem_key: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def get_active_public_problem_content(problem_key: str) -> dict[str, Any] | None:
+    """Return only authored fields safe for the public problem catalog API.
+
+    Hidden judge tests and internal pack identifiers are intentionally absent
+    from the SELECT list so callers cannot serialize them accidentally.
+    """
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT version, statement_summary, input_format, output_format,
+                   constraints_text, sample_tests
+            FROM duel_problem_packs
+            WHERE problem_id = ? AND active = 1
+            ORDER BY version DESC
+            LIMIT 1
+            """,
+            (problem_key,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 # ─── Sync jobs ───────────────────────────────────────────────────────────────
 
 

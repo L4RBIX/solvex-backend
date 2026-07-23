@@ -30,6 +30,7 @@ from contestiq_api.routes import (
     health,
     leaderboards,
     duels,
+    problems,
     recommendations,
     share,
     sync,
@@ -189,3 +190,4 @@ app.include_router(coach.router)
 app.include_router(gamification.router)
 app.include_router(leaderboards.router)
 app.include_router(duels.router)
+app.include_router(problems.router)
