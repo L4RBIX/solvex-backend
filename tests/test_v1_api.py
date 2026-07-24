@@ -391,7 +391,18 @@ def test_legacy_compat_shape_matches_frontend_contract(tmp_path, monkeypatch):
     assert result["summary"]["totalSubmissions"] == 11
     assert result["errorBreakdown"]["wrongAnswer"] == 6
     assert len(result["sevenDayQueue"]) == 7
+    problem_day = next(day for day in result["sevenDayQueue"] if day.get("problemName"))
+    assert (
+        problem_day["problemName"],
+        problem_day["contestId"],
+        problem_day["index"],
+    ) in {
+        (problem["name"], problem["contestId"], problem["index"])
+        for problem in result["recommendedProblems"]
+    }
     assert result["sevenDayQueue"][6]["focus"] == "Review & Reinforce"
+    assert "contestId" not in result["sevenDayQueue"][6]
+    assert "index" not in result["sevenDayQueue"][6]
 
 
 def test_legacy_compat_finds_dp_friction(tmp_path, monkeypatch):
