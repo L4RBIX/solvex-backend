@@ -69,6 +69,53 @@ def _problem_key(sub: dict[str, Any]) -> str:
     return f"{cid}:{sub.get('problem', {}).get('index')}"
 
 
+def _legacy_problem_id(item: dict[str, Any]) -> str | None:
+    contest_id = item.get("contestId")
+    index = item.get("index")
+    if isinstance(contest_id, bool) or not isinstance(index, str):
+        return None
+    try:
+        normalized_contest = int(contest_id)
+    except (TypeError, ValueError):
+        return None
+    normalized_index = index.strip().upper()
+    if normalized_contest <= 0 or not normalized_index or not normalized_index.isalnum():
+        return None
+    return f"{normalized_contest}{normalized_index}"
+
+
+def practice_ready_legacy_analysis(
+    analysis: dict[str, Any],
+    *,
+    completed_problem_ids: set[str],
+    judgeable_problem_ids: set[str],
+) -> dict[str, Any]:
+    """Project public legacy training rows into an owner's practice-ready view.
+
+    This is deliberately response-only. The underlying Codeforces analysis
+    stays public and cacheable; authenticated SolveX completion state is never
+    written into, or reused as, a shared analysis snapshot.
+    """
+    eligible = judgeable_problem_ids - completed_problem_ids
+    recommended = [
+        item
+        for item in analysis.get("recommendedProblems", [])
+        if (problem_id := _legacy_problem_id(item)) is not None and problem_id in eligible
+    ]
+    queue = []
+    for item in analysis.get("sevenDayQueue", []):
+        problem_id = _legacy_problem_id(item)
+        # Keep focus-only/checkpoint rows. Only rows that name a concrete
+        # Arena problem are practice eligibility decisions.
+        if problem_id is None or problem_id in eligible:
+            queue.append(item)
+    return {
+        **analysis,
+        "recommendedProblems": recommended,
+        "sevenDayQueue": queue,
+    }
+
+
 def _build_problem_map(submissions: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     problems: dict[str, dict[str, Any]] = {}
     for sub in submissions:

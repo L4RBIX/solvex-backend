@@ -48,8 +48,13 @@ def daily_queue(payload: DailyQueueRequest, ctx: dict[str, Any] = Depends(entitl
     handle = validate_handle(payload.handle)
     profiles.build_profiles(handle)  # refresh from latest analysis snapshot
     started = time.monotonic()
+    requesting_user_id = ctx["user"]["user_id"] if ctx.get("user") else None
     result = planner.build_daily_queue(
-        handle, queue_date=payload.queue_date, size=payload.size, force=payload.force
+        handle,
+        queue_date=payload.queue_date,
+        size=payload.size,
+        force=payload.force,
+        requesting_user_id=requesting_user_id,
     )
     metrics.observe("recommendation_generation_latency_ms", (time.monotonic() - started) * 1000)
     if not result.get("items"):
@@ -89,7 +94,14 @@ def plan_7_day(payload: PlanRequest, ctx: dict[str, Any] = Depends(entitlements.
 
     handle = validate_handle(payload.handle)
     profiles.build_profiles(handle)
-    plan = planner.build_plan(handle, "7_day", start_date=payload.start_date, force=payload.force)
+    requesting_user_id = ctx["user"]["user_id"] if ctx.get("user") else None
+    plan = planner.build_plan(
+        handle,
+        "7_day",
+        start_date=payload.start_date,
+        force=payload.force,
+        requesting_user_id=requesting_user_id,
+    )
     if plan.get("days"):
         event_subject = product_events.subject_for_handle_action(handle, ctx.get("user"))
         product_events.track("plan_started", event_subject, {"plan_type": "7_day"})
@@ -101,7 +113,14 @@ def plan_14_day(payload: PlanRequest, ctx: dict[str, Any] = Depends(entitlements
     entitlements.require_feature(ctx, "plan_14_day")
     handle = validate_handle(payload.handle)
     profiles.build_profiles(handle)
-    plan = planner.build_plan(handle, "14_day", start_date=payload.start_date, force=payload.force)
+    requesting_user_id = ctx["user"]["user_id"] if ctx.get("user") else None
+    plan = planner.build_plan(
+        handle,
+        "14_day",
+        start_date=payload.start_date,
+        force=payload.force,
+        requesting_user_id=requesting_user_id,
+    )
     if plan.get("days"):
         from contestiq_api import product_events
 

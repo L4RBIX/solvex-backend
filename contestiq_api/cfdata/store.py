@@ -904,6 +904,73 @@ CREATE TABLE IF NOT EXISTS auth_identities (
     UNIQUE(provider, provider_subject)
 );
 CREATE INDEX IF NOT EXISTS idx_auth_identities_user ON auth_identities (user_id);
+
+CREATE TABLE IF NOT EXISTS practice_submissions (
+    submission_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    claim_token TEXT,
+    problem_id TEXT NOT NULL,
+    pack_id TEXT NOT NULL,
+    pack_version INTEGER NOT NULL,
+    test_set_hash TEXT NOT NULL,
+    language TEXT NOT NULL,
+    source TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    client_request_hash TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    queue_item_id TEXT,
+    handle_context TEXT,
+    status TEXT NOT NULL DEFAULT 'judging',
+    status_id INTEGER,
+    judged INTEGER NOT NULL DEFAULT 0,
+    passed INTEGER NOT NULL DEFAULT 0,
+    runtime_ms INTEGER,
+    memory_kb INTEGER,
+    message TEXT NOT NULL DEFAULT '',
+    completion_id TEXT,
+    response_json TEXT,
+    created_at TEXT NOT NULL,
+    judged_at TEXT,
+    UNIQUE(user_id, request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_practice_submissions_user_problem
+    ON practice_submissions (user_id, problem_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS practice_completions (
+    completion_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    problem_id TEXT NOT NULL,
+    completion_mode TEXT NOT NULL DEFAULT 'solvex_practice',
+    first_submission_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    UNIQUE(user_id, problem_id, completion_mode)
+);
+CREATE INDEX IF NOT EXISTS idx_practice_completions_user
+    ON practice_completions (user_id, completed_at DESC);
+
+CREATE TABLE IF NOT EXISTS practice_continuations (
+    recommendation_id TEXT PRIMARY KEY,
+    completion_id TEXT NOT NULL UNIQUE,
+    user_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    source_queue_item_id TEXT,
+    problem_id TEXT,
+    name TEXT,
+    rating INTEGER,
+    tags TEXT NOT NULL DEFAULT '[]',
+    target_skill TEXT,
+    reason TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    exhausted INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_practice_continuations_user_status
+    ON practice_continuations (user_id, status, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_continuations_user_problem_once
+    ON practice_continuations (user_id, problem_id)
+    WHERE problem_id IS NOT NULL;
 """
 
 

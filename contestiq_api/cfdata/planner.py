@@ -121,7 +121,69 @@ class SelectionState:
 # ─── World loading ───────────────────────────────────────────────────────────
 
 
-def _load_world(handle: str) -> dict[str, Any]:
+def owner_practice_constraints(
+    handle: str,
+    requesting_user_id: str | None,
+) -> tuple[set[str], set[str]] | None:
+    """Return (completed, judgeable) ids for this handle's verified owner.
+
+    Public recommendation/planning is intentionally broader than SolveX
+    practice: it may recommend any suitable Codeforces catalog problem. Only
+    a signed-in caller who owns the requested verified handle gets a
+    practice-ready materialization, so a public or non-owner request cannot
+    directly load private completion history into its selection world.
+    """
+    if not requesting_user_id:
+        return None
+
+    from contestiq_api import duels, handles
+
+    canonical = store.canonical_handle(handle)
+    if handles.owner_user_id_for_handle(canonical) != requesting_user_id:
+        return None
+
+    # Authoritative practice submission seeds these same reviewed,
+    # server-owned packs before resolving a problem. Seed here as well so a
+    # planner item cannot immediately fail solely because its built-in pack
+    # had not yet been materialized in this process.
+    duels.seed_builtin_duel_problem_packs()
+    with store.connect() as conn:
+        completion_rows = conn.execute(
+            "SELECT problem_id FROM practice_completions"
+            " WHERE user_id = ? AND completion_mode = 'solvex_practice'",
+            (requesting_user_id,),
+        ).fetchall()
+        pack_rows = conn.execute(
+            """
+            SELECT dpp.*
+            FROM duel_problem_packs dpp
+            JOIN problems p ON p.problem_key = dpp.problem_id
+            WHERE dpp.active = 1
+            ORDER BY dpp.problem_id, dpp.version DESC
+            """
+        ).fetchall()
+
+    completed = {row["problem_id"] for row in completion_rows}
+    latest_packs: dict[str, dict[str, Any]] = {}
+    for row in pack_rows:
+        pack = dict(row)
+        latest_packs.setdefault(pack["problem_id"], pack)
+    judgeable = {
+        pack["problem_id"]
+        for pack in latest_packs.values()
+        if (
+            duels._normalize_judge_tests(pack.get("judge_tests"))
+            and duels._pack_has_complete_content(pack)
+        )
+    }
+    return completed, judgeable
+
+
+def _load_world(
+    handle: str,
+    *,
+    requesting_user_id: str | None = None,
+) -> dict[str, Any]:
     canonical = store.canonical_handle(handle)
     prof = profiles_mod.get_profiles(canonical)
     if not prof:
@@ -138,6 +200,14 @@ def _load_world(handle: str) -> dict[str, Any]:
             " WHERE m.taxonomy_version = ?",
             (TAXONOMY_VERSION,),
         ).fetchall()]
+    practice_constraints = owner_practice_constraints(canonical, requesting_user_id)
+    if practice_constraints is not None:
+        completed, judgeable = practice_constraints
+        candidates = [
+            row
+            for row in candidates
+            if row["problem_key"] in judgeable and row["problem_key"] not in completed
+        ]
     cutoff = max((ep["last_submission_at"] or 0 for ep in episodes), default=0)
     solved, recent = {}, set()
     for ep in episodes:
@@ -251,6 +321,7 @@ def _pick(
     target: int,
     *,
     ignore_diversity: bool = False,
+    quality_conn: Any | None = None,
 ) -> dict[str, Any] | None:
     pool = world["candidates_by_skill"].get(skill_id, [])
     if not pool:
@@ -286,7 +357,10 @@ def _pick(
         shortlist = [row for row in pool if eligible(row, window)]
         if not shortlist:
             continue
-        quality = profiles_mod.quality_scores([row["problem_key"] for row in shortlist])
+        quality = profiles_mod.quality_scores(
+            [row["problem_key"] for row in shortlist],
+            conn=quality_conn,
+        )
         scored = []
         for row in shortlist:
             closeness = 0.5
@@ -449,7 +523,12 @@ def _fill_queue_floor(
 
 
 def build_daily_queue(
-    handle: str, queue_date: str | None = None, size: int = 4, force: bool = False
+    handle: str,
+    queue_date: str | None = None,
+    size: int = 4,
+    force: bool = False,
+    *,
+    requesting_user_id: str | None = None,
 ) -> dict[str, Any]:
     canonical = store.canonical_handle(handle)
     queue_date = queue_date or dt.date.today().isoformat()
@@ -460,7 +539,7 @@ def build_daily_queue(
         if existing is not None:
             return {**existing, "reused": True}
 
-    world = _load_world(canonical)
+    world = _load_world(canonical, requesting_user_id=requesting_user_id)
     if not world["profiles"]:
         return {"handle": canonical, "queue_date": queue_date, "items": [],
                 "warnings": [_no_profiles_warning(canonical)], "reused": False}
@@ -556,7 +635,14 @@ def get_today_queue(handle: str) -> dict[str, Any] | None:
 # ─── Plans ───────────────────────────────────────────────────────────────────
 
 
-def build_plan(handle: str, plan_type: str, start_date: str | None = None, force: bool = False) -> dict[str, Any]:
+def build_plan(
+    handle: str,
+    plan_type: str,
+    start_date: str | None = None,
+    force: bool = False,
+    *,
+    requesting_user_id: str | None = None,
+) -> dict[str, Any]:
     assert plan_type in ("7_day", "14_day")
     canonical = store.canonical_handle(handle)
     start_date = start_date or dt.date.today().isoformat()
@@ -566,7 +652,7 @@ def build_plan(handle: str, plan_type: str, start_date: str | None = None, force
         if existing is not None:
             return {**get_plan(existing), "reused": True}
 
-    world = _load_world(canonical)
+    world = _load_world(canonical, requesting_user_id=requesting_user_id)
     if not world["profiles"]:
         # start_date must always be present: the frontend renders
         # `Starts ${plan.start_date}` unconditionally once a plan object comes

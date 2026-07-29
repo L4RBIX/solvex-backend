@@ -1,8 +1,12 @@
 """Recommendation engine and planner tests (Phase 05) — deterministic, no live CF."""
 
+import json
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 
+from contestiq_api import auth, entitlements, handles
 from contestiq_api.cfdata import episodes, planner, profiles, store, taxonomy, weakness
 
 
@@ -96,6 +100,70 @@ def default_world(recent_failures=False):
 
 def queue(force=False, size=4, date=QUEUE_DATE):
     return planner.build_daily_queue(HANDLE, queue_date=date, size=size, force=force)
+
+
+def seed_reviewed_practice_packs(
+    *,
+    inactive_problem_id: str,
+    incomplete_problem_id: str,
+) -> set[str]:
+    """Back every catalog problem except two explicit invalid-pack controls."""
+    tests = json.dumps([{"input": "1\n", "expected_output": "1\n"}])
+    with store.connect() as conn:
+        problem_ids = [
+            row["problem_key"]
+            for row in conn.execute("SELECT problem_key FROM problems ORDER BY problem_key").fetchall()
+        ]
+        for problem_id in problem_ids:
+            conn.execute(
+                """
+                INSERT INTO duel_problem_packs (
+                    pack_id, problem_id, version, statement_summary, input_format,
+                    output_format, constraints_text, sample_tests, judge_tests,
+                    active, created_at
+                ) VALUES (?, ?, 1, ?, 'One integer.', 'Print one integer.',
+                          'Finite reviewed constraints.', '[]', ?, ?, ?)
+                """,
+                (
+                    f"planner-{problem_id.lower()}-v1",
+                    problem_id,
+                    "" if problem_id == incomplete_problem_id else "A reviewed practice task.",
+                    tests,
+                    0 if problem_id == inactive_problem_id else 1,
+                    store._now(),
+                ),
+            )
+    return set(problem_ids) - {inactive_problem_id, incomplete_problem_id}
+
+
+def premium_owner() -> dict:
+    user = auth.create_user()
+    handles.admin_bind(user["user_id"], HANDLE, audit_actor="planner-regression")
+    entitlements.grant_entitlement(
+        user["user_id"],
+        "premium_student",
+        "test",
+        "planner-regression",
+    )
+    return user
+
+
+def bearer(user: dict) -> dict[str, str]:
+    return {"Authorization": f"Bearer {user['api_token']}"}
+
+
+def record_practice_completions(user_id: str, problem_ids: set[str]) -> None:
+    with store.connect() as conn:
+        for problem_id in problem_ids:
+            conn.execute(
+                """
+                INSERT INTO practice_completions (
+                    completion_id, user_id, problem_id, completion_mode,
+                    first_submission_id, source, completed_at
+                ) VALUES (?, ?, ?, 'solvex_practice', ?, 'daily_queue', ?)
+                """,
+                (str(uuid.uuid4()), user_id, problem_id, str(uuid.uuid4()), store._now()),
+            )
 
 
 # ─── Queue composition ───────────────────────────────────────────────────────
@@ -224,6 +292,130 @@ def test_plans_are_materialized_and_stable():
     second = planner.build_plan(HANDLE, "7_day", start_date=QUEUE_DATE)
     assert second["reused"] is True
     assert second["plan_id"] == first["plan_id"]
+
+
+def test_verified_owner_daily_materialization_is_judgeable_and_skips_practice_completions():
+    default_world()
+    public = planner.build_daily_queue(HANDLE, queue_date="2026-07-01")
+    public_ids = [item["problem_id"] for item in public["items"]]
+    assert len(public_ids) >= 2
+
+    inactive_id, incomplete_id = public_ids[:2]
+    judgeable_ids = seed_reviewed_practice_packs(
+        inactive_problem_id=inactive_id,
+        incomplete_problem_id=incomplete_id,
+    )
+    owner = premium_owner()
+
+    import contestiq_api.main as main
+
+    client = TestClient(main.app)
+    first = client.post(
+        "/api/v1/recommendations/daily",
+        json={"handle": HANDLE, "queue_date": "2026-07-02"},
+        headers=bearer(owner),
+    )
+    assert first.status_code == 200
+    first_body = first.json()
+    assert first_body["reused"] is False
+    first_ids = {item["problem_id"] for item in first_body["items"]}
+    assert first_ids
+    assert first_ids <= judgeable_ids
+    assert {inactive_id, incomplete_id}.isdisjoint(first_ids)
+
+    record_practice_completions(owner["user_id"], first_ids)
+    regenerated = client.post(
+        "/api/v1/recommendations/daily",
+        json={"handle": HANDLE, "queue_date": "2026-07-03"},
+        headers=bearer(owner),
+    )
+    assert regenerated.status_code == 200
+    regenerated_ids = {
+        item["problem_id"]
+        for item in regenerated.json()["items"]
+    }
+    assert regenerated_ids
+    assert regenerated_ids <= judgeable_ids
+    assert first_ids.isdisjoint(regenerated_ids)
+
+    # Public and authenticated non-owner planning remains the original broad
+    # Codeforces recommendation surface; private completion history and
+    # SolveX-pack availability must not affect either result.
+    anonymous = planner.build_daily_queue(HANDLE, queue_date="2026-07-04")
+    assert [item["problem_id"] for item in anonymous["items"]] == public_ids
+    stranger = auth.create_user()
+    non_owner = planner.build_daily_queue(
+        HANDLE,
+        queue_date="2026-07-05",
+        requesting_user_id=stranger["user_id"],
+    )
+    assert [item["problem_id"] for item in non_owner["items"]] == public_ids
+
+
+def test_verified_owner_7_and_14_day_materializations_apply_practice_scope():
+    default_world()
+    public = planner.build_plan(HANDLE, "7_day", start_date="2026-06-01")
+    public_ids = [
+        item["problem_id"]
+        for day in public["days"]
+        for item in day["items"]
+    ]
+    assert len(public_ids) >= 2
+
+    inactive_id, incomplete_id = public_ids[:2]
+    judgeable_ids = seed_reviewed_practice_packs(
+        inactive_problem_id=inactive_id,
+        incomplete_problem_id=incomplete_id,
+    )
+    owner = premium_owner()
+
+    import contestiq_api.main as main
+
+    client = TestClient(main.app)
+    first_7 = client.post(
+        "/api/v1/plans/7-day",
+        json={"handle": HANDLE, "start_date": "2026-06-02"},
+        headers=bearer(owner),
+    )
+    assert first_7.status_code == 200
+    first_ids = {
+        item["problem_id"]
+        for day in first_7.json()["days"]
+        for item in day["items"]
+    }
+    assert first_ids
+    assert first_ids <= judgeable_ids
+    assert {inactive_id, incomplete_id}.isdisjoint(first_ids)
+
+    record_practice_completions(owner["user_id"], first_ids)
+    second_7 = client.post(
+        "/api/v1/plans/7-day",
+        json={"handle": HANDLE, "start_date": "2026-06-03"},
+        headers=bearer(owner),
+    )
+    plan_14 = client.post(
+        "/api/v1/plans/14-day",
+        json={"handle": HANDLE, "start_date": "2026-06-04"},
+        headers=bearer(owner),
+    )
+    assert second_7.status_code == 200
+    assert plan_14.status_code == 200
+    for response in (second_7, plan_14):
+        selected = {
+            item["problem_id"]
+            for day in response.json()["days"]
+            for item in day["items"]
+        }
+        assert selected
+        assert selected <= judgeable_ids
+        assert first_ids.isdisjoint(selected)
+
+    anonymous = planner.build_plan(HANDLE, "7_day", start_date="2026-06-05")
+    assert [
+        item["problem_id"]
+        for day in anonymous["days"]
+        for item in day["items"]
+    ] == public_ids
 
 
 def test_7_day_plan_structure():

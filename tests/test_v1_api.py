@@ -1,5 +1,6 @@
 import importlib
 import json
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -442,6 +443,110 @@ def test_compat_route_serves_legacy_shape(tmp_path, monkeypatch):
     assert "frictionAreas" in data
     assert "sevenDayQueue" in data
     assert data["_meta"]["analysis_version"] == "ml_core_v0.4"
+
+
+def test_compat_retry_queue_is_filtered_only_for_verified_owner(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    import contestiq_api.routes.v1 as v1
+    from contestiq_api import auth, handles
+    from contestiq_api.cfdata import store
+
+    monkeypatch.setattr(v1, "fetch_user_info", lambda handle: _fixture_user())
+    monkeypatch.setattr(v1, "fetch_user_status", lambda handle, count=None: _fixture_submissions())
+
+    store.save_problemset_snapshot(
+        {
+            "problems": [
+                {
+                    "contestId": 3,
+                    "index": "A",
+                    "name": "DP 3",
+                    "rating": 1200,
+                    "tags": ["dp"],
+                }
+            ],
+            "problemStatistics": [],
+        }
+    )
+    tests = json.dumps([{"input": "1\n", "expected_output": "1\n"}])
+    with store.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO duel_problem_packs (
+                pack_id, problem_id, version, statement_summary, input_format,
+                output_format, constraints_text, sample_tests, judge_tests,
+                active, created_at
+            ) VALUES (
+                'compat-3a-v1', '3A', 1, 'Reviewed DP task.', 'One integer.',
+                'Print one integer.', 'Finite constraints.', '[]', ?, 0, ?
+            )
+            """,
+            (tests, store._now()),
+        )
+
+    def retry_ids(body):
+        return {
+            f"{item['contestId']}{item['index']}"
+            for item in body["recommendedProblems"]
+        }
+
+    def queue_ids(body):
+        return {
+            f"{item['contestId']}{item['index']}"
+            for item in body["sevenDayQueue"]
+            if item.get("contestId") and item.get("index")
+        }
+
+    anonymous = client.get("/api/v1/compat/analyze/fixture-user").json()
+    assert retry_ids(anonymous) == {"3A"}
+    assert "3A" in queue_ids(anonymous)
+
+    owner = auth.create_user()
+    handles.admin_bind(owner["user_id"], "fixture-user", audit_actor="compat-regression")
+    owner_headers = {"Authorization": f"Bearer {owner['api_token']}"}
+
+    inactive = client.get(
+        "/api/v1/compat/analyze/fixture-user",
+        headers=owner_headers,
+    ).json()
+    assert retry_ids(inactive) == set()
+    assert "3A" not in queue_ids(inactive)
+
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE duel_problem_packs SET active = 1 WHERE pack_id = 'compat-3a-v1'"
+        )
+    active = client.get(
+        "/api/v1/compat/analyze/fixture-user",
+        headers=owner_headers,
+    ).json()
+    assert retry_ids(active) == {"3A"}
+    assert "3A" in queue_ids(active)
+
+    with store.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO practice_completions (
+                completion_id, user_id, problem_id, completion_mode,
+                first_submission_id, source, completed_at
+            ) VALUES (?, ?, '3A', 'solvex_practice', ?, 'retry_queue', ?)
+            """,
+            (str(uuid.uuid4()), owner["user_id"], str(uuid.uuid4()), store._now()),
+        )
+    completed = client.get(
+        "/api/v1/compat/analyze/fixture-user",
+        headers=owner_headers,
+    ).json()
+    assert retry_ids(completed) == set()
+    assert "3A" not in queue_ids(completed)
+
+    stranger = auth.create_user()
+    non_owner = client.get(
+        "/api/v1/compat/analyze/fixture-user",
+        headers={"Authorization": f"Bearer {stranger['api_token']}"},
+    ).json()
+    assert retry_ids(non_owner) == {"3A"}
+    assert "3A" in queue_ids(non_owner)
 
 
 def test_compat_route_maps_not_found(tmp_path, monkeypatch):
