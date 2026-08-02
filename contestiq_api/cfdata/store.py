@@ -984,7 +984,9 @@ CREATE TABLE IF NOT EXISTS problem_import_batches (
     imported INTEGER NOT NULL DEFAULT 0,
     updated INTEGER NOT NULL DEFAULT 0,
     skipped INTEGER NOT NULL DEFAULT 0,
-    quarantined INTEGER NOT NULL DEFAULT 0
+    quarantined INTEGER NOT NULL DEFAULT 0,
+    catalog_rows_created INTEGER NOT NULL DEFAULT 0,
+    catalog_rows_existing_skipped INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_problem_import_batches_started ON problem_import_batches (started_at DESC);
 

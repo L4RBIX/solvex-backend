@@ -24,6 +24,17 @@ SECURITY — read this before touching this file:
    corrupted or swapped file.
 4. Every file's sha256 is checked against manifest.json before any row is
    imported; a mismatch aborts the whole batch.
+
+CATALOG BACKFILL: routes/problems.py resolves a problem through the
+`problems` table first (populated by the live CF problemset sync), and only
+then looks up `problem_statements`. A fresh database with no CF sync ever
+run would otherwise 404 every problem even after a successful statement
+import. So this importer ALSO backfills `problems`/`problem_statistics` from
+problem_catalog.json, keyed with the exact same `stable_problem_key` helper
+the live sync uses. PRECEDENCE RULE: this archive is a point-in-time
+snapshot; the live sync is the fresher, authoritative source, so this only
+INSERTs rows that don't already exist (see `_upsert_catalog_row_if_missing`)
+and never overwrites what a live sync already populated.
 """
 
 from __future__ import annotations
@@ -42,6 +53,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from contestiq_api.cfdata import store
+from contestiq_core.codeforces.normalizer import stable_problem_key
 
 # ─── Safety limits (defense in depth; the audited archive is ~23MB / 7 files) ─
 
@@ -342,6 +354,8 @@ class ImportReport:
     updated: int
     skipped: int
     quarantined: int
+    catalog_rows_created: int
+    catalog_rows_existing_skipped: int
     availability_status_counts: dict[str, int]
     display_ready_count: int
     solve_ready_count: int
@@ -366,6 +380,8 @@ class ImportReport:
             "updated": self.updated,
             "skipped": self.skipped,
             "quarantined": self.quarantined,
+            "catalog_rows_created": self.catalog_rows_created,
+            "catalog_rows_existing_skipped": self.catalog_rows_existing_skipped,
             "availability_status_counts": self.availability_status_counts,
             "display_ready_count": self.display_ready_count,
             "solve_ready_count": self.solve_ready_count,
@@ -421,7 +437,8 @@ def _update_batch_progress(conn: sqlite3.Connection, batch_id: str, totals: dict
     conn.execute(
         """
         UPDATE problem_import_batches
-        SET total_catalog = ?, imported = ?, updated = ?, skipped = ?, quarantined = ?
+        SET total_catalog = ?, imported = ?, updated = ?, skipped = ?, quarantined = ?,
+            catalog_rows_created = ?, catalog_rows_existing_skipped = ?
         WHERE batch_id = ?
         """,
         (
@@ -430,6 +447,8 @@ def _update_batch_progress(conn: sqlite3.Connection, batch_id: str, totals: dict
             totals["updated"],
             totals["skipped"],
             totals["quarantined"],
+            totals["catalog_rows_created"],
+            totals["catalog_rows_existing_skipped"],
             batch_id,
         ),
     )
@@ -441,7 +460,7 @@ def _finish_batch(conn: sqlite3.Connection, batch_id: str, status: str, totals: 
         """
         UPDATE problem_import_batches
         SET status = ?, completed_at = ?, total_catalog = ?, imported = ?, updated = ?,
-            skipped = ?, quarantined = ?
+            skipped = ?, quarantined = ?, catalog_rows_created = ?, catalog_rows_existing_skipped = ?
         WHERE batch_id = ?
         """,
         (
@@ -452,6 +471,8 @@ def _finish_batch(conn: sqlite3.Connection, batch_id: str, status: str, totals: 
             totals["updated"],
             totals["skipped"],
             totals["quarantined"],
+            totals["catalog_rows_created"],
+            totals["catalog_rows_existing_skipped"],
             batch_id,
         ),
     )
@@ -545,6 +566,53 @@ def _upsert_statement(
     )
 
 
+def _upsert_catalog_row_if_missing(conn: sqlite3.Connection, catalog_row: dict[str, Any]) -> bool:
+    """Backfill `problems`/`problem_statistics` from one catalog row.
+
+    Uses the same `stable_problem_key` the live CF problemset sync
+    (store.save_problemset_snapshot) uses, so keys match exactly and
+    duel/practice lookups keep working against either source.
+
+    PRECEDENCE RULE: this archive is a 2026-07-26 point-in-time snapshot;
+    the live CF sync is the authoritative, fresher source for catalog
+    metadata. INSERT OR IGNORE means an existing row (from a prior or later
+    live sync) is never overwritten by stale archive data — only missing
+    rows are created. Returns True iff a new `problems` row was created.
+    """
+    problem_key = stable_problem_key(catalog_row)
+    now = _now()
+    cursor = conn.execute(
+        """
+        INSERT OR IGNORE INTO problems
+            (problem_key, contest_id, problem_index, name, rating, tags, problemset_name, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            problem_key,
+            catalog_row.get("contest_id"),
+            catalog_row.get("index"),
+            catalog_row.get("name") or problem_key,
+            catalog_row.get("rating"),
+            json.dumps(catalog_row.get("tags") or [], ensure_ascii=False),
+            catalog_row.get("problemset_name"),
+            now,
+        ),
+    )
+    created = cursor.rowcount > 0
+    if created:
+        # solved_count from the archive only accompanies a newly created
+        # catalog row — an existing problem_statistics row is left to the
+        # live sync for the same precedence reason as `problems` above.
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO problem_statistics (problem_key, solved_count, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (problem_key, catalog_row.get("solved_count"), now),
+        )
+    return created
+
+
 def _insert_quarantine(
     conn: sqlite3.Connection,
     batch_id: str,
@@ -609,7 +677,15 @@ def import_problem_database(
     fallback_queue_count = len(fallback_queue) if isinstance(fallback_queue, list) else 0
     asset_queue_count = len(asset_queue) if isinstance(asset_queue, list) else 0
 
-    totals = {"total_catalog": len(catalog), "imported": 0, "updated": 0, "skipped": 0, "quarantined": 0}
+    totals = {
+        "total_catalog": len(catalog),
+        "imported": 0,
+        "updated": 0,
+        "skipped": 0,
+        "quarantined": 0,
+        "catalog_rows_created": 0,
+        "catalog_rows_existing_skipped": 0,
+    }
     availability_counts: dict[str, int] = {status: 0 for status in VALID_AVAILABILITY_STATUSES}
     quarantine_reasons: dict[str, int] = {}
     display_ready_count = 0
@@ -649,6 +725,16 @@ def import_problem_database(
 
         processed_since_commit = 0
         for problem_id, catalog_row in valid_rows:
+            if conn is not None:
+                # Backfill problems/problem_statistics regardless of whether
+                # this row's *content* later turns out to be quarantined —
+                # the catalog metadata (name/rating/tags) is independent of
+                # problem_content.json and is still valid on its own.
+                if _upsert_catalog_row_if_missing(conn, catalog_row):
+                    totals["catalog_rows_created"] += 1
+                else:
+                    totals["catalog_rows_existing_skipped"] += 1
+
             content = content_map.get(problem_id)
             reason = _validate_content_entry(content)
             if reason is not None:
@@ -719,6 +805,8 @@ def import_problem_database(
         updated=totals["updated"],
         skipped=totals["skipped"],
         quarantined=totals["quarantined"],
+        catalog_rows_created=totals["catalog_rows_created"],
+        catalog_rows_existing_skipped=totals["catalog_rows_existing_skipped"],
         availability_status_counts=availability_counts,
         display_ready_count=display_ready_count,
         solve_ready_count=solve_ready_count,

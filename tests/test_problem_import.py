@@ -437,6 +437,129 @@ def test_latex_and_angle_bracket_content_round_trips_verbatim(tmp_path):
     assert row["statement"] == tricky_statement
 
 
+# ─── Catalog backfill (problems / problem_statistics) ────────────────────────
+#
+# These are the true end-to-end tests: NO manual seeding of `problems`. This
+# is exactly the gap that let 1A/125B 404 in production after a real import —
+# every earlier test in this file only checked problem_statements directly,
+# and every API test in test_public_problems.py seeded `problems` by hand
+# via the `catalog` fixture, so neither caught it.
+
+
+def test_end_to_end_import_then_api_fetch_without_seeding_problems(tmp_path):
+    from fastapi.testclient import TestClient
+
+    import contestiq_api.main as main
+
+    archive = _write_archive(
+        tmp_path / "e2e.zip",
+        catalog=[
+            _base_catalog_row("1A", contest_id=1, index="A", name="Theatre Square", rating=1000, tags=["math"]),
+            _base_catalog_row(
+                "125B", contest_id=125, index="B", name="XML Parsing", rating=2000, tags=["expression parsing"]
+            ),
+        ],
+        content={
+            "1A": _base_content_entry(
+                title="Theatre Square",
+                description="Theatre Square needs n*m flagstones of size a*a.",
+                input_format="Three integers n, m, a.",
+                output_format="The number of flagstones.",
+            ),
+            "125B": _base_content_entry(
+                title="XML Parsing",
+                description="Parse the opening tag <a> and verify $x < y$ holds.",
+            ),
+        },
+    )
+
+    report = pi.import_problem_database(archive, batch_id="e2e-batch")
+    assert report.status == "completed"
+    assert report.catalog_rows_created == 2
+    assert report.catalog_rows_existing_skipped == 0
+
+    with store.connect() as conn:
+        problems_count = conn.execute("SELECT COUNT(*) FROM problems").fetchone()[0]
+    assert problems_count == 2  # confirms `problems` was empty before import and was backfilled by it
+
+    client = TestClient(main.app)
+
+    response = client.get("/api/v1/problems/1A")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "Theatre Square"
+    assert data["contest_id"] == 1
+    assert data["index"] == "A"
+    assert data["rating"] == 1000
+    assert data["statement_content"] is not None
+    assert data["statement_content"]["title"] == "Theatre Square"
+    assert data["statement_content"]["statement"] == "Theatre Square needs n*m flagstones of size a*a."
+    assert data["statement_content"]["availability"]["solve_ready"] is True
+
+    serialized = json.dumps(data).lower()
+    for forbidden in ("editorial", "reference_code", "judge_test", "expected_output", "pack_id"):
+        assert forbidden not in serialized
+
+    response2 = client.get("/api/v1/problems/125B")
+    assert response2.status_code == 200
+    data2 = response2.json()
+    assert data2["statement_content"]["statement"] == "Parse the opening tag <a> and verify $x < y$ holds."
+    serialized2 = json.dumps(data2).lower()
+    for forbidden in ("editorial", "reference_code", "judge_test", "expected_output", "pack_id"):
+        assert forbidden not in serialized2
+
+
+def test_existing_problems_row_is_not_overwritten_by_archive(tmp_path):
+    problem_key = "1A"
+    with store.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO problems (problem_key, contest_id, problem_index, name, rating, tags, problemset_name, updated_at)
+            VALUES (?, 1, 'A', 'LIVE SYNC NAME', 2500, '["live-tag"]', NULL, ?)
+            """,
+            (problem_key, "2026-01-01T00:00:00+00:00"),
+        )
+
+    archive = _write_archive(
+        tmp_path / "stale.zip",
+        catalog=[
+            _base_catalog_row(
+                "1A", contest_id=1, index="A", name="STALE ARCHIVE NAME", rating=800, tags=["stale-tag"]
+            )
+        ],
+        content={"1A": _base_content_entry()},
+    )
+    report = pi.import_problem_database(archive, batch_id="precedence-batch")
+    assert report.status == "completed"
+    assert report.catalog_rows_created == 0
+    assert report.catalog_rows_existing_skipped == 1
+
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT name, rating, tags FROM problems WHERE problem_key = ?", (problem_key,)
+        ).fetchone()
+    assert row["name"] == "LIVE SYNC NAME"
+    assert row["rating"] == 2500
+    assert row["tags"] == '["live-tag"]'
+
+
+def test_problem_statistics_solved_count_populated_for_new_rows(tmp_path):
+    archive = _write_archive(
+        tmp_path / "stats.zip",
+        catalog=[_base_catalog_row("1A", contest_id=1, index="A", solved_count=54321)],
+        content={"1A": _base_content_entry()},
+    )
+    report = pi.import_problem_database(archive, batch_id="stats-batch")
+    assert report.catalog_rows_created == 1
+
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT solved_count FROM problem_statistics WHERE problem_key = '1A'"
+        ).fetchone()
+    assert row is not None
+    assert row["solved_count"] == 54321
+
+
 def test_report_includes_queue_counts_and_source_sha256(tmp_path):
     archive = _write_archive(
         tmp_path / "queues.zip",

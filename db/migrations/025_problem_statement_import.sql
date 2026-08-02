@@ -16,6 +16,16 @@
 -- this dataset's catalog (11k+ Codeforces problems) is broader than whatever
 -- has been synced locally via the CF problemset API at import time, and the
 -- import must not fail wholesale just because that sync hasn't caught up.
+--
+-- The importer ALSO backfills `problems`/`problem_statistics` (the tables
+-- the public API and duel/practice lookups already read, keyed by the same
+-- stable_problem_key format) from problem_catalog.json, so a fresh database
+-- can serve imported statements without a live CF problemset sync ever
+-- having run. Precedence rule: this archive is a 2026-07-26 point-in-time
+-- snapshot; the live CF sync is the authoritative, fresher source for
+-- catalog metadata. The importer therefore only INSERTs rows into
+-- `problems`/`problem_statistics` that don't already exist — it never
+-- overwrites a row the live sync already populated.
 
 create table if not exists problem_import_batches (
   batch_id text primary key,
@@ -30,7 +40,12 @@ create table if not exists problem_import_batches (
   imported integer not null default 0,
   updated integer not null default 0,
   skipped integer not null default 0,
-  quarantined integer not null default 0
+  quarantined integer not null default 0,
+  -- Rows this batch created in `problems`/`problem_statistics` from the
+  -- archive's catalog vs. rows that already existed there (and were left
+  -- untouched — see the precedence-rule comment further down).
+  catalog_rows_created integer not null default 0,
+  catalog_rows_existing_skipped integer not null default 0
 );
 create index if not exists idx_problem_import_batches_started
   on problem_import_batches (started_at desc);
