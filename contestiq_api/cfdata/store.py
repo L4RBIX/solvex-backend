@@ -971,6 +971,69 @@ CREATE INDEX IF NOT EXISTS idx_practice_continuations_user_status
 CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_continuations_user_problem_once
     ON practice_continuations (user_id, problem_id)
     WHERE problem_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS problem_import_batches (
+    batch_id TEXT PRIMARY KEY,
+    source_name TEXT NOT NULL,
+    source_sha256 TEXT NOT NULL,
+    manifest_version TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    total_catalog INTEGER NOT NULL DEFAULT 0,
+    imported INTEGER NOT NULL DEFAULT 0,
+    updated INTEGER NOT NULL DEFAULT 0,
+    skipped INTEGER NOT NULL DEFAULT 0,
+    quarantined INTEGER NOT NULL DEFAULT 0,
+    catalog_rows_created INTEGER NOT NULL DEFAULT 0,
+    catalog_rows_existing_skipped INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_problem_import_batches_started ON problem_import_batches (started_at DESC);
+
+-- Display content ONLY, mirrors db/migrations/025_problem_statement_import.sql.
+-- See contestiq_api/cfdata/problem_import.py: `editorial` and `reference_code`
+-- are dropped at the parse boundary and never reach this table, and this
+-- pipeline never touches duel_problem_packs or judge_tests.
+CREATE TABLE IF NOT EXISTS problem_statements (
+    problem_id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    title TEXT,
+    statement TEXT,
+    input_format TEXT,
+    output_format TEXT,
+    interaction_format TEXT,
+    notes TEXT,
+    samples TEXT NOT NULL DEFAULT '[]',
+    time_limit_seconds REAL,
+    memory_limit_megabytes REAL,
+    difficulty TEXT,
+    io_mode TEXT,
+    is_interactive INTEGER NOT NULL DEFAULT 0,
+    picture_count INTEGER,
+    has_missing_diagrams INTEGER NOT NULL DEFAULT 0,
+    availability_status TEXT NOT NULL,
+    display_ready INTEGER NOT NULL DEFAULT 0,
+    solve_ready INTEGER NOT NULL DEFAULT 0,
+    unavailable_reason TEXT,
+    source_dataset TEXT,
+    source_urls TEXT NOT NULL DEFAULT '[]',
+    statement_relation TEXT,
+    shared_statement_from TEXT,
+    imported_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_problem_statements_batch ON problem_statements (batch_id);
+CREATE INDEX IF NOT EXISTS idx_problem_statements_availability ON problem_statements (availability_status);
+
+CREATE TABLE IF NOT EXISTS problem_import_quarantine (
+    id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    problem_id TEXT,
+    reason TEXT NOT NULL,
+    detail TEXT,
+    quarantined_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_problem_import_quarantine_batch ON problem_import_quarantine (batch_id, quarantined_at DESC);
 """
 
 
@@ -1356,6 +1419,32 @@ def get_active_public_problem_content(problem_key: str) -> dict[str, Any] | None
             LIMIT 1
             """,
             (problem_key,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_problem_statement(problem_id: str) -> dict[str, Any] | None:
+    """Return only PUBLIC display content imported by problem_import.py.
+
+    Columns are listed explicitly (never `SELECT *`): `editorial` and
+    `reference_code` from the source dataset were never imported into this
+    table in the first place (see contestiq_api/cfdata/problem_import.py),
+    and there are no judge-test or duel/pack columns on this table at all —
+    this reader must stay that way even if the table gains columns later.
+    """
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT problem_id, title, statement, input_format, output_format,
+                   interaction_format, notes, samples, time_limit_seconds,
+                   memory_limit_megabytes, difficulty, io_mode, is_interactive,
+                   has_missing_diagrams, availability_status, display_ready,
+                   solve_ready, unavailable_reason, source_dataset, source_urls,
+                   statement_relation, shared_statement_from
+            FROM problem_statements
+            WHERE problem_id = ?
+            """,
+            (problem_id,),
         ).fetchone()
     return dict(row) if row else None
 
