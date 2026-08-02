@@ -182,15 +182,17 @@ def _solved_count_stability(solved_count: int | None) -> float:
     return min(1.0, math.log10(solved_count + 1) / 5.0)
 
 
-def quality_scores(problem_ids: list[str]) -> dict[str, float]:
+def quality_scores(problem_ids: list[str], conn: Any | None = None) -> dict[str, float]:
     """Q(p) for a batch of problems."""
     if not problem_ids:
         return {}
     placeholders = ", ".join("?" for _ in problem_ids)
-    with store.connect() as conn:
+    owned_conn = store.connect() if conn is None else None
+    active_conn = owned_conn or conn
+    try:
         confidence = {
             row["problem_id"]: row["c"]
-            for row in conn.execute(
+            for row in active_conn.execute(
                 f"SELECT problem_id, MAX(confidence) AS c FROM problem_skill_map"
                 f" WHERE taxonomy_version = ? AND problem_id IN ({placeholders}) GROUP BY problem_id",
                 [TAXONOMY_VERSION, *problem_ids],
@@ -198,23 +200,26 @@ def quality_scores(problem_ids: list[str]) -> dict[str, float]:
         }
         stats = {
             row["problem_key"]: row["solved_count"]
-            for row in conn.execute(
+            for row in active_conn.execute(
                 f"SELECT problem_key, solved_count FROM problem_statistics WHERE problem_key IN ({placeholders})",
                 problem_ids,
             ).fetchall()
         }
         quality_rows = {
             row["problem_id"]: dict(row)
-            for row in conn.execute(
+            for row in active_conn.execute(
                 f"SELECT * FROM problem_quality_stats WHERE problem_id IN ({placeholders})", problem_ids
             ).fetchall()
         }
         rated = {
             row["problem_key"]: row["rating"] is not None
-            for row in conn.execute(
+            for row in active_conn.execute(
                 f"SELECT problem_key, rating FROM problems WHERE problem_key IN ({placeholders})", problem_ids
             ).fetchall()
         }
+    finally:
+        if owned_conn is not None:
+            owned_conn.close()
 
     scores: dict[str, float] = {}
     for pid in problem_ids:

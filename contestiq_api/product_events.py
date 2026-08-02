@@ -30,6 +30,9 @@ EVENT_TYPES = {
     "duel_started",
     "duel_completed",
     "duel_won",
+    # Authoritative Solo-practice completion. One event is inserted
+    # transactionally per unique practice_completions row.
+    "practice_problem_completed",
     # Phase G4.1 live duel room — telemetry only, zero XP (hints must never earn XP).
     "duel_ready",
     "duel_arena_opened",

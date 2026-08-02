@@ -33,6 +33,9 @@ XP_RULES: dict[str, int] = {
     # Phase G4: only completed/won award XP (create/join/start are tracked but 0 XP).
     "duel_completed": 10,
     "duel_won": 15,
+    # Each distinct backend-verified problem completion earns XP. Database
+    # uniqueness prevents farming the same problem; the daily cap still wins.
+    "practice_problem_completed": 25,
 }
 
 MEANINGFUL_EVENT_TYPES = frozenset(XP_RULES)
@@ -51,6 +54,7 @@ EVENT_LABELS: dict[str, str] = {
     "plan_started": "Started a training plan",
     "duel_completed": "Completed a friend duel",
     "duel_won": "Won a friend duel",
+    "practice_problem_completed": "Completed a SolveX practice problem",
 }
 
 # Daily XP cap by plan. Team/event/admin share a single higher beta ceiling
@@ -184,18 +188,46 @@ def _meaningful(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
+def _xp_award_key(event: dict[str, Any]) -> tuple[str, str | None]:
+    """Identity of one XP-bearing action within a UTC day.
+
+    Existing action types intentionally remain once-per-type-per-day. A
+    practice completion is different: every database-unique completion earns
+    XP, while a duplicated product event for the same completion is ignored
+    defensively.
+    """
+    event_type = str(event["event_type"])
+    if event_type != "practice_problem_completed":
+        return event_type, None
+    properties = event.get("properties")
+    if not isinstance(properties, dict):
+        properties = {}
+    identity = (
+        properties.get("completion_id")
+        or properties.get("problem_id")
+        or event.get("event_id")
+        or event.get("created_at")
+    )
+    return event_type, str(identity)
+
+
+def _raw_daily_xp(events: list[dict[str, Any]]) -> int:
+    keys = {_xp_award_key(event) for event in events}
+    return sum(XP_RULES[event_type] for event_type, _identity in keys)
+
+
 def compute_xp_total(events: list[dict[str, Any]], daily_cap: int) -> int:
-    """Sum daily-capped XP. Within a day, each event *type* contributes its
-    XP at most once (repeating one action all day cannot out-earn the cap by
-    itself); distinct action types on the same day still stack, up to the
-    plan's daily cap."""
-    by_day: dict[dt.date, set[str]] = {}
+    """Sum daily-capped XP.
+
+    Ordinary actions contribute once per type/day. Each distinct authoritative
+    practice completion contributes once per completion identity.
+    """
+    by_day: dict[dt.date, list[dict[str, Any]]] = {}
     for event in _meaningful(events):
-        by_day.setdefault(_event_date(event), set()).add(event["event_type"])
+        by_day.setdefault(_event_date(event), []).append(event)
     total = 0
-    for _day, types in by_day.items():
-        day_raw = sum(XP_RULES[t] for t in types)
-        total += min(day_raw, daily_cap)
+    for day_events in by_day.values():
+        total += min(_raw_daily_xp(day_events), daily_cap)
     return total
 
 
@@ -304,9 +336,10 @@ def compute_badges(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 # ─── Recent XP events (Phase G2 transparency) ────────────────────────────────
 #
-# Per-event XP attribution replays history with the same two rules as
-# compute_xp_total (each event type earns at most once per UTC day; the day
-# total is capped by plan), so the per-event awards always sum to xp_total.
+# Per-event XP attribution replays history with the same rules as
+# compute_xp_total (ordinary types earn once per UTC day, distinct verified
+# practice completions each earn once, and the day total is capped by plan),
+# so the per-event awards always sum to xp_total.
 # Only event_type / label / xp / timestamp are exposed — never the raw
 # product_event `properties` payload, which may carry internal identifiers.
 
@@ -316,15 +349,16 @@ RECENT_XP_EVENTS_LIMIT = 10
 def compute_recent_xp_events(
     events: list[dict[str, Any]], daily_cap: int, limit: int = RECENT_XP_EVENTS_LIMIT
 ) -> list[dict[str, Any]]:
-    day_types: dict[dt.date, set[str]] = {}
+    day_awards: dict[dt.date, set[tuple[str, str | None]]] = {}
     day_totals: dict[dt.date, int] = {}
     attributed: list[dict[str, Any]] = []
     for event in _meaningful(events):  # chronological replay
         day = _event_date(event)
         etype = event["event_type"]
-        awarded_types = day_types.setdefault(day, set())
+        award_key = _xp_award_key(event)
+        awarded_keys = day_awards.setdefault(day, set())
         raw = XP_RULES[etype]
-        if etype in awarded_types:
+        if award_key in awarded_keys:
             # Repeating the same action within a day never re-awards XP —
             # this is the anti-farming rule, not the daily cap.
             awarded, cap_applied = 0, False
@@ -332,7 +366,7 @@ def compute_recent_xp_events(
             remaining = max(0, daily_cap - day_totals.get(day, 0))
             awarded = min(raw, remaining)
             cap_applied = awarded < raw
-            awarded_types.add(etype)
+            awarded_keys.add(award_key)
             day_totals[day] = day_totals.get(day, 0) + awarded
         attributed.append({
             "event_type": etype,
@@ -503,14 +537,15 @@ def compute_weekly_stats(
     meaningful = _meaningful(events)
     week_events = [e for e in meaningful if start <= _event_date(e) < end]
 
-    by_day: dict[dt.date, set[str]] = {}
+    by_day: dict[dt.date, list[dict[str, Any]]] = {}
     for event in week_events:
-        by_day.setdefault(_event_date(event), set()).add(event["event_type"])
+        by_day.setdefault(_event_date(event), []).append(event)
 
     weekly_xp = 0
     daily_goals_completed = 0
-    for day, types in by_day.items():
-        day_raw = sum(XP_RULES[t] for t in types)
+    for day, day_events in by_day.items():
+        types = {event["event_type"] for event in day_events}
+        day_raw = _raw_daily_xp(day_events)
         weekly_xp += min(day_raw, daily_cap)
         completed_categories = sum(1 for _gid, _label, qualifying in GOAL_ITEM_DEFS if types & qualifying)
         if completed_categories >= DAILY_GOAL_REQUIRED_COUNT:

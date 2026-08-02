@@ -19,6 +19,7 @@ from contestiq_api.errors import APIError
 # Requests per IP per UTC day. Test hook: monkeypatch this dict.
 DAILY_LIMITS: dict[str, int] = {
     "execute": 500,
+    "practice_submit": 500,
     "badge_view": 2000,
     "billing_webhook": 5000,
     "judge0_callback": 20000,

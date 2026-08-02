@@ -32,6 +32,13 @@ _STATUS_MAP: dict[int, str] = {
     14: "runtime_error",
 }
 
+
+def _normalized_status(status_id: int, description: str = "") -> str:
+    if "memory limit" in description.casefold():
+        return "memory_limit"
+    return _STATUS_MAP.get(status_id, "error")
+
+
 _POLL_INTERVAL_S = 1.0
 _MAX_POLLS = 15         # 15 s total timeout
 
@@ -109,6 +116,7 @@ async def run_submission(
     if final is None:
         return {
             "status": "error",
+            "status_id": None,
             "stdout": "",
             "stderr": "",
             "compile_output": "",
@@ -122,12 +130,19 @@ async def run_submission(
     stderr = _b64dec(final.get("stderr"))
     compile_output = _b64dec(final.get("compile_output"))
     message = _norm(final.get("message"))
-    status_id = (final.get("status") or {}).get("id", 13)
-    solvex_status = _STATUS_MAP.get(status_id, "error")
+    raw_status = final.get("status") or {}
+    status_id = raw_status.get("id", 13)
+    solvex_status = _normalized_status(
+        status_id,
+        _norm(raw_status.get("description")),
+    )
 
     if solvex_status == "accepted" and expected_output is not None:
         if not _outputs_match(stdout, expected_output):
             solvex_status = "wrong_answer"
+            # The normalized status must remain internally consistent even
+            # though Judge0 itself reported process success (3).
+            status_id = 4
 
     raw_time = final.get("time")
     time_ms: int | None = None
@@ -139,6 +154,7 @@ async def run_submission(
 
     return {
         "status": solvex_status,
+        "status_id": status_id,
         "stdout": stdout,
         "stderr": stderr,
         "compile_output": compile_output,

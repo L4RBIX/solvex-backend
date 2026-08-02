@@ -12,9 +12,10 @@ from typing import Any
 from fastapi import APIRouter, Header, Request
 from pydantic import BaseModel, Field
 
-from contestiq_api import jobs
+from contestiq_api import auth, jobs
+from contestiq_api.cfdata import planner
 from contestiq_api.errors import APIError
-from contestiq_api.legacy_compat import legacy_analysis
+from contestiq_api.legacy_compat import legacy_analysis, practice_ready_legacy_analysis
 from contestiq_api.metadata import response_metadata
 from contestiq_api.rate_limit import check_analyze_rate_limit
 from contestiq_api.routes.health import health as legacy_health
@@ -160,13 +161,20 @@ def latest_analysis(handle: str):
 
 
 @router.get("/compat/analyze/{handle}")
-def compat_legacy_analysis(handle: str):
+def compat_legacy_analysis(handle: str, request: Request):
     """Temporary adapter serving the legacy frontend AnalysisResult shape.
 
     Exists so the Next.js /api/analyze route can proxy here instead of running
     its own TypeScript analysis. Remove once the UI consumes /api/v1 directly.
+
+    The public analysis remains identical for anonymous and non-owner callers.
+    A direct authenticated request by the handle's verified owner receives a
+    response-time practice projection. The frontend's same-origin fallback
+    forwards bearer identity and marks personalized responses private/no-store,
+    so this projection is never baked into its shared anonymous cache.
     """
     cleaned = validate_handle(handle)
+    caller = auth.current_user(request)
     try:
         user = fetch_user_info(cleaned)
         submissions = fetch_user_status(cleaned)
@@ -184,6 +192,17 @@ def compat_legacy_analysis(handle: str):
         raise APIError("CODEFORCES_UNAVAILABLE", "Codeforces API is temporarily unavailable. Try again later.", 502) from exc
 
     result = legacy_analysis(user, submissions)
+    constraints = planner.owner_practice_constraints(
+        cleaned,
+        caller["user_id"] if caller else None,
+    )
+    if constraints is not None:
+        completed, judgeable = constraints
+        result = practice_ready_legacy_analysis(
+            result,
+            completed_problem_ids=completed,
+            judgeable_problem_ids=judgeable,
+        )
     meta = response_metadata(source="codeforces_public_api", warnings=[], data_cutoff_time=None)
     # Legacy shape stays at the top level for the existing UI; v1 metadata rides along.
     return {**result, "_meta": meta}
