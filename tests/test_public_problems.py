@@ -161,6 +161,107 @@ def test_authored_problem_returns_only_public_authored_content(client, catalog):
         assert forbidden not in serialized
 
 
+# ─── statement_content (PR: problem-database import) ────────────────────────
+
+
+def _seed_statement(problem_id: str, **overrides) -> None:
+    """Insert a problem_statements row directly (bypassing the importer,
+    which has its own dedicated tests in tests/test_problem_import.py)."""
+    now = "2026-08-02T00:00:00+00:00"
+    payload = {
+        "problem_id": problem_id,
+        "batch_id": "test-batch",
+        "content_hash": "test-hash",
+        "title": "Way Too Long Words",
+        "statement": "Parse the opening tag <a> and verify $x < y$ holds.",
+        "input_format": "The first line contains n.",
+        "output_format": "Print the answer.",
+        "interaction_format": None,
+        "notes": None,
+        "samples": json.dumps([{"input": "2\nword\nlocalization\n", "output": "word\nl10n\n"}]),
+        "time_limit_seconds": 1.0,
+        "memory_limit_megabytes": 256.0,
+        "difficulty": "EASY",
+        "io_mode": "stdio",
+        "is_interactive": 0,
+        "picture_count": 0,
+        "has_missing_diagrams": 0,
+        "availability_status": "complete_standard",
+        "display_ready": 1,
+        "solve_ready": 1,
+        "unavailable_reason": None,
+        "source_dataset": "open-r1/codeforces",
+        "source_urls": json.dumps(["https://codeforces.com/problemset/problem/71/A"]),
+        "statement_relation": None,
+        "shared_statement_from": None,
+        "imported_at": now,
+    }
+    payload.update(overrides)
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO problem_import_batches (batch_id, source_name, source_sha256, status, started_at)"
+            " VALUES (?, 'test-archive.zip', 'deadbeef', 'completed', ?)",
+            (payload["batch_id"], now),
+        )
+        conn.execute(
+            """
+            INSERT INTO problem_statements (
+                problem_id, batch_id, content_hash, title, statement, input_format, output_format,
+                interaction_format, notes, samples, time_limit_seconds, memory_limit_megabytes,
+                difficulty, io_mode, is_interactive, picture_count, has_missing_diagrams,
+                availability_status, display_ready, solve_ready, unavailable_reason,
+                source_dataset, source_urls, statement_relation, shared_statement_from, imported_at
+            ) VALUES (
+                :problem_id, :batch_id, :content_hash, :title, :statement, :input_format, :output_format,
+                :interaction_format, :notes, :samples, :time_limit_seconds, :memory_limit_megabytes,
+                :difficulty, :io_mode, :is_interactive, :picture_count, :has_missing_diagrams,
+                :availability_status, :display_ready, :solve_ready, :unavailable_reason,
+                :source_dataset, :source_urls, :statement_relation, :shared_statement_from, :imported_at
+            )
+            """,
+            payload,
+        )
+
+
+def test_statement_content_is_served_when_imported(client, catalog):
+    _seed_statement("71A")
+
+    response = client.get("/api/v1/problems/71A")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["statement_content"] is not None
+    statement = data["statement_content"]
+    assert statement["title"] == "Way Too Long Words"
+    assert statement["statement"] == "Parse the opening tag <a> and verify $x < y$ holds."
+    assert statement["examples"] == [{"input": "2\nword\nlocalization\n", "output": "word\nl10n\n"}]
+    assert statement["io_mode"] == "stdio"
+    assert statement["is_interactive"] is False
+    assert statement["has_missing_diagrams"] is False
+    assert statement["availability"] == {
+        "status": "complete_standard",
+        "display_ready": True,
+        "solve_ready": True,
+        "unavailable_reason": None,
+    }
+    assert statement["source"] == {
+        "dataset": "open-r1/codeforces",
+        "urls": ["https://codeforces.com/problemset/problem/71/A"],
+    }
+
+    # The public API response must never leak judging/private internals,
+    # even now that statement_content is populated from imported data.
+    serialized = json.dumps(data).lower()
+    for forbidden in ("editorial", "reference_code", "judge_tests", "expected_output"):
+        assert forbidden not in serialized
+
+
+def test_problem_without_imported_statement_has_null_statement_content(client, catalog):
+    response = client.get("/api/v1/problems/1364B")
+    assert response.status_code == 200
+    assert response.json()["statement_content"] is None
+
+
 def test_newest_active_authored_content_is_selected(client, catalog):
     assert duels.upsert_duel_problem_pack(
         {
