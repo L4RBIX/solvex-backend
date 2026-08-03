@@ -288,7 +288,119 @@ def _gamification_snapshot(caller: dict[str, Any]) -> dict[str, Any]:
     return {
         "xp_total": snapshot["xp_total"],
         "streak": snapshot["streak"]["current"],
+        "daily_goal": snapshot["daily_goal"],
     }
+
+
+def _daily_cap_for_caller(caller: dict[str, Any]) -> int:
+    from contestiq_api import auth
+
+    user = auth.get_user(caller["user_id"])
+    return gamification.resolve_daily_cap(entitlements.effective_plan(user))
+
+
+def _account_events_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+) -> list[dict[str, Any]]:
+    """Read the account's bounded aliases through the caller's write lock."""
+    user_subject = f"user:{user_id}"
+    binding = conn.execute(
+        "SELECT handle, verified_at FROM handle_owners WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    subjects = [user_subject]
+    handle_subject: str | None = None
+    cutoff: dt.datetime | None = None
+    if binding is not None:
+        handle_subject = f"handle:{binding['handle']}"
+        subjects.append(handle_subject)
+        try:
+            cutoff = dt.datetime.fromisoformat(binding["verified_at"])
+            if cutoff.tzinfo is None:
+                cutoff = cutoff.replace(tzinfo=dt.timezone.utc)
+        except (TypeError, ValueError):
+            cutoff = None
+    placeholders = ", ".join("?" for _ in subjects)
+    rows = conn.execute(
+        f"SELECT event_id, event_type, subject, properties, created_at "
+        f"FROM product_events WHERE subject IN ({placeholders}) ORDER BY created_at, event_id",
+        subjects,
+    ).fetchall()
+    bounded: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        if item.get("subject") == handle_subject and cutoff is not None:
+            try:
+                created = dt.datetime.fromisoformat(item["created_at"])
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=dt.timezone.utc)
+            except (TypeError, ValueError):
+                continue
+            if created > cutoff:
+                continue
+        item["properties"] = _parse_json(item.get("properties"), {})
+        bounded.append(item)
+
+    result: list[dict[str, Any]] = []
+    seen_first: set[str] = set()
+    for event in bounded:
+        event_type = str(event.get("event_type") or "")
+        if event_type.startswith("first_"):
+            if event_type in seen_first:
+                continue
+            seen_first.add(event_type)
+        result.append(event)
+    return result
+
+
+def _completion_event_effects_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    caller: dict[str, Any],
+    completion_id: str,
+    daily_cap: int,
+) -> tuple[int, bool, bool]:
+    """Return exact XP, daily-goal, and streak changes for a new event."""
+    events = _account_events_in_transaction(conn, user_id=caller["user_id"])
+    completion_event = next(
+        (
+            event
+            for event in events
+            if event.get("event_type") == PRACTICE_EVENT
+            and isinstance(event.get("properties"), dict)
+            and event["properties"].get("completion_id") == completion_id
+        ),
+        None,
+    )
+    if completion_event is None:
+        raise RuntimeError("completion product event was not persisted")
+
+    before = [event for event in events if event is not completion_event]
+    event_day = gamification._event_date(completion_event)
+    before_goal = gamification.compute_daily_goal(before, today=event_day)
+    after_goal = gamification.compute_daily_goal(events, today=event_day)
+    before_streak = gamification.compute_streak(before, today=event_day)
+    after_streak = gamification.compute_streak(events, today=event_day)
+
+    awarded_keys: dict[Any, set[tuple[str, str | None]]] = {}
+    day_totals: dict[Any, int] = {}
+    award = 0
+    for event in gamification._meaningful(events):
+        day = gamification._event_date(event)
+        key = gamification._xp_award_key(event)
+        seen = awarded_keys.setdefault(day, set())
+        raw = gamification.XP_RULES[event["event_type"]]
+        if key in seen:
+            current_award = 0
+        else:
+            current_award = min(raw, max(0, daily_cap - day_totals.get(day, 0)))
+            seen.add(key)
+            day_totals[day] = day_totals.get(day, 0) + current_award
+        if event is completion_event:
+            award = current_award
+    return award, before_goal != after_goal, before_streak != after_streak
 
 
 def _completion_xp_awarded(caller: dict[str, Any], completion_id: str) -> int:
@@ -333,7 +445,9 @@ def _resolve_queue_context(
         item = conn.execute(
             """
             SELECT ri.item_id, ri.problem_id, ri.skill_id, ri.target_rating, ri.mode,
-                   rr.handle, rr.run_id AS container_id
+                   ri.item_status,
+                   rr.handle, rr.owner_user_id, rr.run_id AS container_id,
+                   rr.created_at AS container_created_at
             FROM recommendation_items ri
             JOIN recommendation_runs rr ON rr.run_id = ri.run_id
             WHERE ri.item_id = ?
@@ -345,7 +459,9 @@ def _resolve_queue_context(
             item = conn.execute(
                 """
                 SELECT tpi.item_id, tpi.problem_id, tpi.skill_id, tpi.target_rating, tpi.mode,
-                       tp.handle, tp.plan_id AS container_id, tp.plan_type
+                       tpi.item_status,
+                       tp.handle, tp.owner_user_id, tp.plan_id AS container_id, tp.plan_type,
+                       tp.plan_status, tp.created_at AS container_created_at
                 FROM training_plan_items tpi
                 JOIN training_plans tp ON tp.plan_id = tpi.plan_id
                 WHERE tpi.item_id = ?
@@ -357,9 +473,10 @@ def _resolve_queue_context(
             item = conn.execute(
                 """
                 SELECT recommendation_id AS item_id, problem_id, target_skill AS skill_id,
-                       rating AS target_rating, source, user_id
+                       rating AS target_rating, source, user_id,
+                       created_at AS container_created_at
                 FROM practice_continuations
-                WHERE recommendation_id = ? AND user_id = ?
+                WHERE recommendation_id = ? AND user_id = ? AND status = 'active'
                 """,
                 (queue_item_id, caller["user_id"]),
             ).fetchone()
@@ -367,6 +484,19 @@ def _resolve_queue_context(
         if item is None:
             return None
         context = dict(item)
+
+        # A public handle-scoped queue can be useful display context, but it is
+        # not an authenticated assignment. Only a materialization explicitly
+        # owned by this account may backdate a Solo assignment. Continuations
+        # are already selected by user_id above and are therefore trusted.
+        owned_active = (
+            caller is not None
+            and context.get("owner_user_id") == caller["user_id"]
+            and context.get("item_status") == "proposed"
+            and (kind != "plan" or context.get("plan_status") == "active")
+        )
+        if kind != "continuation" and not owned_active:
+            context.pop("container_created_at", None)
 
         owner_handle = context.get("handle")
         caller_handle = caller.get("handle") if caller else None
@@ -464,6 +594,27 @@ def _active_pack_problem_ids(conn: sqlite3.Connection) -> set[str]:
     return usable
 
 
+def _eligible_catalog_problem_ids(conn: sqlite3.Connection) -> set[str]:
+    """Problems that are safe to open in Arena, independent of private packs.
+
+    A catalog row without imported statement metadata remains eligible for
+    backward compatibility. Once metadata exists, explicitly non-solve-ready,
+    interactive, and file-I/O tasks are excluded.
+    """
+    rows = conn.execute(
+        """
+        SELECT p.problem_key
+        FROM problems p
+        LEFT JOIN problem_statements ps ON ps.problem_id = p.problem_key
+        WHERE ps.problem_id IS NULL
+           OR (ps.solve_ready = 1
+               AND ps.is_interactive = 0
+               AND COALESCE(ps.io_mode, 'stdio') = 'stdio')
+        """
+    ).fetchall()
+    return {row["problem_key"] for row in rows}
+
+
 def _problem_skills(conn: sqlite3.Connection, problem_id: str) -> list[str]:
     rows = conn.execute(
         """
@@ -487,12 +638,13 @@ def _select_next(
     context: dict[str, Any] | None,
     visible_problem_ids: set[str],
     guest_completed_problem_ids: set[str],
+    require_private_pack: bool = True,
 ) -> dict[str, Any] | None:
     exclusions = {problem_id, *visible_problem_ids}
     exclusions.update(context.get("container_problem_ids", set()) if context else set())
     if user_id:
         completion_rows = conn.execute(
-            "SELECT problem_id FROM practice_completions WHERE user_id = ?",
+            "SELECT problem_id FROM problem_completions WHERE user_id = ?",
             (user_id,),
         ).fetchall()
         continuation_rows = conn.execute(
@@ -504,7 +656,11 @@ def _select_next(
     else:
         exclusions.update(guest_completed_problem_ids)
 
-    usable_ids = _active_pack_problem_ids(conn)
+    usable_ids = (
+        _active_pack_problem_ids(conn)
+        if require_private_pack
+        else _eligible_catalog_problem_ids(conn)
+    )
     scoped_world = copy.deepcopy(world)
     scoped_world["suppressed"] = set(scoped_world.get("suppressed", set())) | exclusions
     scoped_world["recently_attempted"] = set(scoped_world.get("recently_attempted", set()))
@@ -564,7 +720,7 @@ def _select_next(
             "target_skill": skill_id,
             "reason": (
                 f"Continue {source.replace('_', ' ')} practice on {skill_id} "
-                f"near rating {target}; selected from reviewed SolveX-judgeable problems."
+                f"near rating {target}; selected from eligible Arena problems."
             ),
         }
     return None
@@ -660,7 +816,7 @@ def _recover_terminal_response(
     if outcome["passed"] and completion_id:
         with store.connect() as conn:
             completion = conn.execute(
-                "SELECT * FROM practice_completions WHERE completion_id = ? AND user_id = ?",
+                "SELECT * FROM problem_completions WHERE completion_id = ? AND user_id = ?",
                 (completion_id, caller["user_id"]),
             ).fetchone()
             continuation = conn.execute(
@@ -675,20 +831,24 @@ def _recover_terminal_response(
                 (caller["user_id"], existing["problem_id"]),
             ).fetchone()[0]
         if completion is not None:
-            recorded = completion["first_submission_id"] == existing["submission_id"]
+            recorded = completion["practice_submission_id"] == existing["submission_id"]
             response["completion"] = {
                 "completion_id": completion["completion_id"],
                 "persistent": True,
                 "recorded": recorded,
                 "already_completed": not recorded,
                 "completed_at": completion["completed_at"],
-                "xp_awarded": (
-                    _completion_xp_awarded(caller, completion["completion_id"])
-                    if recorded
-                    else 0
-                ),
+                "xp_awarded": int(completion["xp_awarded"] or 0) if recorded else 0,
                 "attempt_count": attempt_count,
-                "source": completion["source"],
+                "source": completion["queue_source"] or "direct_arena",
+            }
+            response["effects"] = {
+                "solution_verified": True,
+                "problem_marked_completed": recorded,
+                "solved_history_updated": recorded and bool(completion["history_updated"]),
+                "xp_updated": recorded and int(completion["xp_awarded"] or 0) > 0,
+                "daily_goal_updated": recorded and bool(completion["daily_goal_updated"]),
+                "training_queue_refreshed": recorded and bool(completion["queue_refreshed"]),
             }
             response["next_problem"] = _continuation_payload(continuation)
             response["queue"] = (
@@ -945,18 +1105,24 @@ def _mark_owned_items_completed(
         UPDATE recommendation_items
         SET item_status = 'completed'
         WHERE problem_id = ?
-          AND run_id IN (SELECT run_id FROM recommendation_runs WHERE handle = ?)
+          AND run_id IN (
+              SELECT run_id FROM recommendation_runs
+              WHERE handle = ? AND owner_user_id = ?
+          )
         """,
-        (problem_id, handle),
+        (problem_id, handle, user_id),
     )
     conn.execute(
         """
         UPDATE training_plan_items
         SET item_status = 'completed'
         WHERE problem_id = ?
-          AND plan_id IN (SELECT plan_id FROM training_plans WHERE handle = ?)
+          AND plan_id IN (
+              SELECT plan_id FROM training_plans
+              WHERE handle = ? AND owner_user_id = ? AND plan_status = 'active'
+          )
         """,
-        (problem_id, handle),
+        (problem_id, handle, user_id),
     )
 
 
@@ -1040,20 +1206,18 @@ def _complete_authenticated(
     context: dict[str, Any] | None,
     world: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    daily_cap = _daily_cap_for_caller(caller)
     with store.connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         existing = conn.execute(
-            """
-            SELECT * FROM practice_completions
-            WHERE user_id = ? AND problem_id = ? AND completion_mode = ?
-            """,
-            (caller["user_id"], request["problem_id"], COMPLETION_MODE),
+            "SELECT * FROM problem_completions WHERE user_id = ? AND problem_id = ?",
+            (caller["user_id"], request["problem_id"]),
         ).fetchone()
         recorded = existing is None
         if existing is not None:
             completion_id = existing["completion_id"]
             completed_at = existing["completed_at"]
-            source = existing["source"]
+            source = existing["queue_source"] or "direct_arena"
         else:
             completion_id = str(uuid.uuid4())
             completed_at = _monotonic_completion_time(
@@ -1071,6 +1235,82 @@ def _complete_authenticated(
             raise ClaimRevoked(submission_id)
 
         if recorded:
+            attempt = conn.execute(
+                "SELECT created_at, language FROM practice_submissions WHERE submission_id = ?",
+                (submission_id,),
+            ).fetchone()
+            if attempt is None:
+                raise RuntimeError("practice submission disappeared before completion")
+
+            assignment = conn.execute(
+                """
+                SELECT * FROM solo_problem_assignments
+                WHERE user_id = ? AND problem_id = ? AND status = 'active'
+                ORDER BY assigned_at, assignment_id LIMIT 1
+                """,
+                (caller["user_id"], request["problem_id"]),
+            ).fetchone()
+            if assignment is None:
+                assignment_id = str(uuid.uuid4())
+                assigned_at = str(
+                    (context or {}).get("container_created_at") or attempt["created_at"]
+                )
+                conn.execute(
+                    """
+                    INSERT INTO solo_problem_assignments (
+                        assignment_id, user_id, problem_id, source, queue_item_id,
+                        assigned_at, opened_at, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
+                    """,
+                    (
+                        assignment_id,
+                        caller["user_id"],
+                        request["problem_id"],
+                        source,
+                        request.get("queue_item_id") if context else None,
+                        assigned_at,
+                        attempt["created_at"],
+                    ),
+                )
+                assignment = conn.execute(
+                    "SELECT * FROM solo_problem_assignments WHERE assignment_id = ?",
+                    (assignment_id,),
+                ).fetchone()
+            assert assignment is not None
+
+            # The canonical row is written before the compatibility ledger and
+            # continuation, so PostgreSQL's canonical continuation FK is never
+            # temporarily invalid.
+            conn.execute(
+                """
+                INSERT INTO problem_completions (
+                    completion_id, user_id, problem_id, completion_source,
+                    is_historical, practice_submission_id, programming_language,
+                    assignment_id, assigned_at, queue_source, queue_item_id,
+                    completed_at, xp_awarded, history_updated,
+                    daily_goal_updated, streak_updated, progress_updated,
+                    queue_refreshed, effects_applied_at
+                ) VALUES (
+                    :completion_id, :user_id, :problem_id, 'solvex_practice_judge',
+                    0, :submission_id, :language,
+                    :assignment_id, :assigned_at, :queue_source, :queue_item_id,
+                    :completed_at, 0, 1, 0, 0, 1, 0, :effects_applied_at
+                )
+                """,
+                {
+                    "completion_id": completion_id,
+                    "user_id": caller["user_id"],
+                    "problem_id": request["problem_id"],
+                    "submission_id": submission_id,
+                    "language": attempt["language"],
+                    "assignment_id": assignment["assignment_id"],
+                    "assigned_at": assignment["assigned_at"],
+                    "queue_source": source,
+                    "queue_item_id": request.get("queue_item_id") if context else None,
+                    "completed_at": completed_at,
+                    "effects_applied_at": completed_at,
+                },
+            )
             conn.execute(
                 """
                 INSERT INTO practice_completions (
@@ -1088,13 +1328,14 @@ def _complete_authenticated(
                     completed_at,
                 ),
             )
-
-        continuation = conn.execute(
-            "SELECT * FROM practice_continuations WHERE completion_id = ?",
-            (completion_id,),
-        ).fetchone()
-        selection_failed = False
-        if recorded:
+            conn.execute(
+                """
+                UPDATE solo_problem_assignments
+                SET status = 'completed', completion_id = ?
+                WHERE assignment_id = ?
+                """,
+                (completion_id, assignment["assignment_id"]),
+            )
             _mark_owned_items_completed(
                 conn,
                 user_id=caller["user_id"],
@@ -1122,11 +1363,42 @@ def _complete_authenticated(
                 ),
             )
 
-        if continuation is None:
+            xp_awarded, daily_goal_updated, streak_updated = (
+                _completion_event_effects_in_transaction(
+                    conn,
+                    caller=caller,
+                    completion_id=completion_id,
+                    daily_cap=daily_cap,
+                )
+            )
+            if caller.get("handle"):
+                from contestiq_api import completions
+
+                completions._update_skill_evidence(
+                    conn,
+                    handle=str(caller["handle"]),
+                    problem_id=request["problem_id"],
+                    practiced_at=int(dt.datetime.fromisoformat(completed_at).timestamp()),
+                )
+
+        continuation = conn.execute(
+            "SELECT * FROM practice_continuations WHERE completion_id = ?",
+            (completion_id,),
+        ).fetchone()
+        selection_failed = False
+        repairable_existing = bool(
+            existing is not None
+            and not bool(existing["is_historical"])
+            and not bool(existing["queue_refreshed"])
+        )
+        repair_applied = repairable_existing and continuation is not None
+        if (recorded or repairable_existing) and continuation is None:
             if world is None:
                 selection_failed = True
             else:
                 try:
+                    from contestiq_api import completions
+
                     candidate = _select_next(
                         conn,
                         world=world,
@@ -1134,8 +1406,9 @@ def _complete_authenticated(
                         problem_id=request["problem_id"],
                         source=source,
                         context=context,
-                        visible_problem_ids=set(request.get("visible_problem_ids") or []),
+                        visible_problem_ids=completions._server_visible_problem_ids(caller),
                         guest_completed_problem_ids=set(),
+                        require_private_pack=False,
                     )
                 except Exception:
                     selection_failed = True
@@ -1145,8 +1418,53 @@ def _complete_authenticated(
                     completion_id=completion_id,
                     user_id=caller["user_id"],
                     source=source,
-                    source_queue_item_id=request.get("queue_item_id"),
+                    source_queue_item_id=(
+                        existing["queue_item_id"]
+                        if existing is not None
+                        else request.get("queue_item_id")
+                    ),
                     candidate=candidate,
+                )
+                repair_applied = repairable_existing
+
+        if recorded:
+            queue_refreshed = continuation is not None
+            conn.execute(
+                """
+                UPDATE problem_completions
+                SET xp_awarded = ?, daily_goal_updated = ?, streak_updated = ?,
+                    queue_refreshed = ?, replacement_problem_id = ?,
+                    replacement_queue_item_id = ?
+                WHERE completion_id = ?
+                """,
+                (
+                    xp_awarded,
+                    1 if daily_goal_updated else 0,
+                    1 if streak_updated else 0,
+                    1 if queue_refreshed else 0,
+                    continuation["problem_id"] if continuation is not None else None,
+                    continuation["recommendation_id"] if continuation is not None else None,
+                    completion_id,
+                ),
+            )
+        else:
+            xp_awarded = 0
+            daily_goal_updated = False
+            streak_updated = False
+            queue_refreshed = repair_applied
+            if repair_applied and continuation is not None:
+                conn.execute(
+                    """
+                    UPDATE problem_completions
+                    SET queue_refreshed = 1, replacement_problem_id = ?,
+                        replacement_queue_item_id = ?
+                    WHERE completion_id = ?
+                    """,
+                    (
+                        continuation["problem_id"],
+                        continuation["recommendation_id"],
+                        completion_id,
+                    ),
                 )
 
         attempt_count = conn.execute(
@@ -1165,6 +1483,10 @@ def _complete_authenticated(
         "completed_at": completed_at,
         "attempt_count": attempt_count,
         "source": source,
+        "xp_awarded": xp_awarded,
+        "history_updated": recorded,
+        "daily_goal_updated": daily_goal_updated,
+        "queue_refreshed": queue_refreshed,
         "continuation": dict(continuation) if continuation is not None else None,
         "selection_failed": selection_failed,
     }
@@ -1193,6 +1515,14 @@ def _base_response(
         "compile_output": outcome.get("compile_output") or "",
         "completion": None,
         "progress": progress,
+        "effects": {
+            "solution_verified": False,
+            "problem_marked_completed": False,
+            "solved_history_updated": False,
+            "xp_updated": False,
+            "daily_goal_updated": False,
+            "training_queue_refreshed": False,
+        },
         "next_problem": None,
         "queue": _queue_payload(None),
     }
@@ -1332,15 +1662,22 @@ async def submit(
                 raise
             return replay
         progress_after = _gamification_snapshot(caller)
-        xp_awarded = (
-            _completion_xp_awarded(caller, completion["completion_id"])
-            if completion["recorded"]
-            else 0
-        )
+        xp_awarded = int(completion.pop("xp_awarded"))
+        history_updated = bool(completion.pop("history_updated"))
+        daily_goal_updated = bool(completion.pop("daily_goal_updated"))
+        queue_refreshed = bool(completion.pop("queue_refreshed"))
         continuation = completion.pop("continuation")
         selection_failed = completion.pop("selection_failed")
         response["completion"] = {**completion, "xp_awarded": xp_awarded}
         response["progress"] = progress_after
+        response["effects"] = {
+            "solution_verified": True,
+            "problem_marked_completed": bool(completion["recorded"]),
+            "solved_history_updated": history_updated,
+            "xp_updated": xp_awarded > 0,
+            "daily_goal_updated": daily_goal_updated,
+            "training_queue_refreshed": queue_refreshed,
+        }
         response["next_problem"] = _continuation_payload(continuation)
         response["queue"] = (
             {
@@ -1386,6 +1723,7 @@ async def submit(
         "attempt_count": 1,
         "source": effective_source,
     }
+    response["effects"]["solution_verified"] = True
     if selection_failed:
         response["queue"] = {
             "exhausted": False,
@@ -1410,6 +1748,15 @@ async def submit(
 
 def progress(user_id: str) -> dict[str, Any]:
     with store.connect() as conn:
+        authoritative = conn.execute(
+            """
+            SELECT completion_id, problem_id, completed_at, is_historical, queue_refreshed
+            FROM problem_completions
+            WHERE user_id = ?
+            ORDER BY completed_at, problem_id
+            """,
+            (user_id,),
+        ).fetchall()
         completions = conn.execute(
             """
             SELECT pc.completion_id, pc.problem_id, pc.completion_mode,
@@ -1434,6 +1781,7 @@ def progress(user_id: str) -> dict[str, Any]:
             (user_id,),
         ).fetchall()
     completion_items = [dict(row) for row in completions]
+    authoritative_items = [dict(row) for row in authoritative]
     continuation_items = [dict(row) for row in continuations]
     active_continuations = [
         row
@@ -1441,8 +1789,9 @@ def progress(user_id: str) -> dict[str, Any]:
         if row["status"] == "active" and not bool(row["exhausted"])
     ]
     latest_completion_id = (
-        completion_items[-1]["completion_id"] if completion_items else None
+        authoritative_items[-1]["completion_id"] if authoritative_items else None
     )
+    latest_authoritative = authoritative_items[-1] if authoritative_items else None
     latest_continuation = next(
         (
             row
@@ -1458,7 +1807,12 @@ def progress(user_id: str) -> dict[str, Any]:
         }
     elif latest_continuation is not None and bool(latest_continuation["exhausted"]):
         queue = _queue_payload(latest_continuation)
-    elif completion_items:
+    elif latest_authoritative is not None and bool(latest_authoritative["is_historical"]):
+        queue = {
+            "exhausted": False,
+            "message": "Historical completion saved; no training replacement was generated.",
+        }
+    elif authoritative_items:
         queue = {
             "exhausted": False,
             "message": (
@@ -1468,8 +1822,8 @@ def progress(user_id: str) -> dict[str, Any]:
     else:
         queue = _queue_payload(None)
     return {
-        "total_completed": len(completion_items),
-        "completed_problem_ids": [item["problem_id"] for item in completion_items],
+        "total_completed": len(authoritative_items),
+        "completed_problem_ids": [item["problem_id"] for item in authoritative_items],
         "completions": completion_items,
         "continuation_items": [
             payload

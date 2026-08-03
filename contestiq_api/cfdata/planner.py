@@ -136,47 +136,46 @@ def owner_practice_constraints(
     if not requesting_user_id:
         return None
 
-    from contestiq_api import duels, handles
+    from contestiq_api import handles
 
     canonical = store.canonical_handle(handle)
     if handles.owner_user_id_for_handle(canonical) != requesting_user_id:
         return None
 
-    # Authoritative practice submission seeds these same reviewed,
-    # server-owned packs before resolving a problem. Seed here as well so a
-    # planner item cannot immediately fail solely because its built-in pack
-    # had not yet been materialized in this process.
-    duels.seed_builtin_duel_problem_packs()
     with store.connect() as conn:
         completion_rows = conn.execute(
-            "SELECT problem_id FROM practice_completions"
-            " WHERE user_id = ? AND completion_mode = 'solvex_practice'",
+            "SELECT problem_id FROM problem_completions WHERE user_id = ?",
             (requesting_user_id,),
         ).fetchall()
-        pack_rows = conn.execute(
+        eligible_rows = conn.execute(
             """
-            SELECT dpp.*
-            FROM duel_problem_packs dpp
-            JOIN problems p ON p.problem_key = dpp.problem_id
-            WHERE dpp.active = 1
-            ORDER BY dpp.problem_id, dpp.version DESC
+            SELECT p.problem_key
+            FROM problems p
+            LEFT JOIN problem_statements ps ON ps.problem_id = p.problem_key
+            WHERE ps.problem_id IS NULL
+               OR (ps.solve_ready = 1
+                   AND ps.is_interactive = 0
+                   AND COALESCE(ps.io_mode, 'stdio') = 'stdio')
             """
         ).fetchall()
 
     completed = {row["problem_id"] for row in completion_rows}
-    latest_packs: dict[str, dict[str, Any]] = {}
-    for row in pack_rows:
-        pack = dict(row)
-        latest_packs.setdefault(pack["problem_id"], pack)
-    judgeable = {
-        pack["problem_id"]
-        for pack in latest_packs.values()
-        if (
-            duels._normalize_judge_tests(pack.get("judge_tests"))
-            and duels._pack_has_complete_content(pack)
-        )
-    }
+    judgeable = {row["problem_key"] for row in eligible_rows}
     return completed, judgeable
+
+
+def _materialization_owner(handle: str, requesting_user_id: str | None) -> str | None:
+    """Return an account scope only for the handle's verified owner."""
+    if not requesting_user_id:
+        return None
+    from contestiq_api import handles
+
+    canonical = store.canonical_handle(handle)
+    return (
+        requesting_user_id
+        if handles.owner_user_id_for_handle(canonical) == requesting_user_id
+        else None
+    )
 
 
 def _load_world(
@@ -533,9 +532,10 @@ def build_daily_queue(
     canonical = store.canonical_handle(handle)
     queue_date = queue_date or dt.date.today().isoformat()
     size = max(3, min(5, size))
+    owner_user_id = _materialization_owner(canonical, requesting_user_id)
 
     if not force:
-        existing = _get_queue_run(canonical, queue_date)
+        existing = _get_queue_run(canonical, queue_date, owner_user_id=owner_user_id)
         if existing is not None:
             return {**existing, "reused": True}
 
@@ -594,9 +594,9 @@ def build_daily_queue(
     }
     with store.connect() as conn:
         conn.execute(
-            "INSERT INTO recommendation_runs (run_id, handle, analysis_run_id, queue_date, recent_struggle, warnings, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (run["run_id"], canonical, analysis_run_id, queue_date, struggle,
+            "INSERT INTO recommendation_runs (run_id, handle, owner_user_id, analysis_run_id, queue_date, recent_struggle, warnings, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (run["run_id"], canonical, owner_user_id, analysis_run_id, queue_date, struggle,
              json.dumps(warnings, ensure_ascii=False), run["created_at"]),
         )
         for item in items:
@@ -611,25 +611,49 @@ def build_daily_queue(
     return {**run, "items": items, "reused": False}
 
 
-def _get_queue_run(handle: str, queue_date: str) -> dict[str, Any] | None:
+def _get_queue_run(
+    handle: str,
+    queue_date: str,
+    *,
+    owner_user_id: str | None = None,
+) -> dict[str, Any] | None:
     with store.connect() as conn:
-        run = conn.execute(
-            "SELECT * FROM recommendation_runs WHERE handle = ? AND queue_date = ? ORDER BY created_at DESC LIMIT 1",
-            (handle, queue_date),
-        ).fetchone()
+        if owner_user_id is None:
+            run = conn.execute(
+                "SELECT * FROM recommendation_runs WHERE handle = ? AND queue_date = ?"
+                " AND owner_user_id IS NULL ORDER BY created_at DESC LIMIT 1",
+                (handle, queue_date),
+            ).fetchone()
+        else:
+            run = conn.execute(
+                "SELECT * FROM recommendation_runs WHERE handle = ? AND queue_date = ?"
+                " AND owner_user_id = ? ORDER BY created_at DESC LIMIT 1",
+                (handle, queue_date, owner_user_id),
+            ).fetchone()
         if run is None:
             return None
         items = conn.execute(
             "SELECT * FROM recommendation_items WHERE run_id = ? ORDER BY slot", (run["run_id"],)
         ).fetchall()
     payload = dict(run)
+    payload.pop("owner_user_id", None)
     payload["warnings"] = json.loads(payload["warnings"])
     payload["items"] = [dict(item) for item in items]
     return payload
 
 
-def get_today_queue(handle: str) -> dict[str, Any] | None:
-    return _get_queue_run(store.canonical_handle(handle), dt.date.today().isoformat())
+def get_today_queue(
+    handle: str,
+    *,
+    requesting_user_id: str | None = None,
+) -> dict[str, Any] | None:
+    canonical = store.canonical_handle(handle)
+    owner_user_id = _materialization_owner(canonical, requesting_user_id)
+    return _get_queue_run(
+        canonical,
+        dt.date.today().isoformat(),
+        owner_user_id=owner_user_id,
+    )
 
 
 # ─── Plans ───────────────────────────────────────────────────────────────────
@@ -646,11 +670,20 @@ def build_plan(
     assert plan_type in ("7_day", "14_day")
     canonical = store.canonical_handle(handle)
     start_date = start_date or dt.date.today().isoformat()
+    owner_user_id = _materialization_owner(canonical, requesting_user_id)
 
     if not force:
-        existing = _find_plan(canonical, plan_type, start_date)
+        existing = _find_plan(
+            canonical,
+            plan_type,
+            start_date,
+            owner_user_id=owner_user_id,
+        )
         if existing is not None:
-            return {**get_plan(existing), "reused": True}
+            return {
+                **get_plan(existing, requesting_user_id=owner_user_id),
+                "reused": True,
+            }
 
     world = _load_world(canonical, requesting_user_id=requesting_user_id)
     if not world["profiles"]:
@@ -681,9 +714,9 @@ def build_plan(
     days_payload = []
     with store.connect() as conn:
         conn.execute(
-            "INSERT INTO training_plans (plan_id, handle, plan_type, analysis_run_id, start_date, plan_status, created_at)"
-            " VALUES (?, ?, ?, ?, ?, 'active', ?)",
-            (plan_id, canonical, plan_type, analysis_run_id, start_date, store._now()),
+            "INSERT INTO training_plans (plan_id, handle, owner_user_id, plan_type, analysis_run_id, start_date, plan_status, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, 'active', ?)",
+            (plan_id, canonical, owner_user_id, plan_type, analysis_run_id, start_date, store._now()),
         )
         for day_number, theme, slots in template:
             conn.execute(
@@ -745,20 +778,41 @@ def build_plan(
     }
 
 
-def _find_plan(handle: str, plan_type: str, start_date: str) -> str | None:
+def _find_plan(
+    handle: str,
+    plan_type: str,
+    start_date: str,
+    *,
+    owner_user_id: str | None = None,
+) -> str | None:
     with store.connect() as conn:
-        row = conn.execute(
-            "SELECT plan_id FROM training_plans WHERE handle = ? AND plan_type = ? AND start_date = ?"
-            " AND plan_status = 'active' ORDER BY created_at DESC LIMIT 1",
-            (handle, plan_type, start_date),
-        ).fetchone()
+        if owner_user_id is None:
+            row = conn.execute(
+                "SELECT plan_id FROM training_plans WHERE handle = ? AND plan_type = ? AND start_date = ?"
+                " AND owner_user_id IS NULL AND plan_status = 'active'"
+                " ORDER BY created_at DESC LIMIT 1",
+                (handle, plan_type, start_date),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT plan_id FROM training_plans WHERE handle = ? AND plan_type = ? AND start_date = ?"
+                " AND owner_user_id = ? AND plan_status = 'active'"
+                " ORDER BY created_at DESC LIMIT 1",
+                (handle, plan_type, start_date, owner_user_id),
+            ).fetchone()
     return row["plan_id"] if row else None
 
 
-def get_plan(plan_id: str) -> dict[str, Any] | None:
+def get_plan(
+    plan_id: str,
+    *,
+    requesting_user_id: str | None = None,
+) -> dict[str, Any] | None:
     with store.connect() as conn:
         plan = conn.execute("SELECT * FROM training_plans WHERE plan_id = ?", (plan_id,)).fetchone()
         if plan is None:
+            return None
+        if plan["owner_user_id"] is not None and plan["owner_user_id"] != requesting_user_id:
             return None
         days = conn.execute(
             "SELECT * FROM training_plan_days WHERE plan_id = ? ORDER BY day_number", (plan_id,)

@@ -283,6 +283,7 @@ CREATE TABLE IF NOT EXISTS user_skill_profiles (
 CREATE TABLE IF NOT EXISTS recommendation_runs (
     run_id TEXT PRIMARY KEY,
     handle TEXT NOT NULL,
+    owner_user_id TEXT REFERENCES users(user_id) ON DELETE SET NULL,
     analysis_run_id TEXT,
     queue_date TEXT NOT NULL,
     recent_struggle REAL NOT NULL DEFAULT 0,
@@ -310,6 +311,7 @@ CREATE INDEX IF NOT EXISTS idx_recommendation_items_run ON recommendation_items 
 CREATE TABLE IF NOT EXISTS training_plans (
     plan_id TEXT PRIMARY KEY,
     handle TEXT NOT NULL,
+    owner_user_id TEXT REFERENCES users(user_id) ON DELETE SET NULL,
     plan_type TEXT NOT NULL,
     analysis_run_id TEXT,
     start_date TEXT NOT NULL,
@@ -972,6 +974,132 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_continuations_user_problem_once
     ON practice_continuations (user_id, problem_id)
     WHERE problem_id IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS solo_problem_assignments (
+    assignment_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    problem_id TEXT NOT NULL REFERENCES problems(problem_key),
+    source TEXT NOT NULL CHECK (length(trim(source)) > 0),
+    queue_item_id TEXT,
+    assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    opened_at TEXT,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'completed', 'superseded', 'dismissed')),
+    completion_id TEXT,
+    CHECK (opened_at IS NULL OR opened_at >= assigned_at)
+);
+CREATE INDEX IF NOT EXISTS idx_solo_problem_assignments_user
+    ON solo_problem_assignments (user_id, assigned_at DESC);
+CREATE INDEX IF NOT EXISTS idx_solo_problem_assignments_problem
+    ON solo_problem_assignments (problem_id, assigned_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_solo_problem_assignments_active
+    ON solo_problem_assignments (user_id, problem_id)
+    WHERE status = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_solo_problem_assignments_queue_item
+    ON solo_problem_assignments (user_id, source, queue_item_id)
+    WHERE queue_item_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS problem_completions (
+    completion_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    problem_id TEXT NOT NULL REFERENCES problems(problem_key),
+    completion_source TEXT NOT NULL
+        CHECK (completion_source IN ('solvex_practice_judge', 'codeforces_verified')),
+    is_historical INTEGER NOT NULL DEFAULT 0 CHECK (is_historical IN (0, 1)),
+    practice_submission_id TEXT REFERENCES practice_submissions(submission_id),
+    codeforces_submission_id INTEGER,
+    codeforces_handle TEXT,
+    contest_id INTEGER,
+    problem_index TEXT,
+    verdict TEXT,
+    programming_language TEXT,
+    codeforces_created_at TEXT,
+    verified_at TEXT,
+    assignment_id TEXT REFERENCES solo_problem_assignments(assignment_id) ON DELETE SET NULL,
+    assigned_at TEXT,
+    queue_source TEXT,
+    queue_item_id TEXT,
+    completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    xp_awarded INTEGER NOT NULL DEFAULT 0 CHECK (xp_awarded >= 0),
+    history_updated INTEGER NOT NULL DEFAULT 0 CHECK (history_updated IN (0, 1)),
+    daily_goal_updated INTEGER NOT NULL DEFAULT 0 CHECK (daily_goal_updated IN (0, 1)),
+    streak_updated INTEGER NOT NULL DEFAULT 0 CHECK (streak_updated IN (0, 1)),
+    progress_updated INTEGER NOT NULL DEFAULT 0 CHECK (progress_updated IN (0, 1)),
+    queue_refreshed INTEGER NOT NULL DEFAULT 0 CHECK (queue_refreshed IN (0, 1)),
+    replacement_problem_id TEXT REFERENCES problems(problem_key),
+    replacement_queue_item_id TEXT,
+    effects_applied_at TEXT,
+    UNIQUE (user_id, problem_id),
+    CHECK (is_historical = 0 OR completion_source = 'codeforces_verified'),
+    CHECK (is_historical = 0 OR xp_awarded = 0),
+    CHECK (is_historical = 1 OR assigned_at IS NULL OR assigned_at <= completed_at),
+    CHECK (
+        (completion_source = 'solvex_practice_judge'
+            AND practice_submission_id IS NOT NULL
+            AND codeforces_submission_id IS NULL
+            AND codeforces_handle IS NULL
+            AND contest_id IS NULL
+            AND problem_index IS NULL
+            AND verdict IS NULL
+            AND codeforces_created_at IS NULL
+            AND verified_at IS NULL)
+        OR
+        (completion_source = 'codeforces_verified'
+            AND practice_submission_id IS NULL
+            AND codeforces_submission_id IS NOT NULL
+            AND codeforces_submission_id > 0
+            AND codeforces_handle IS NOT NULL
+            AND length(trim(codeforces_handle)) > 0
+            AND contest_id IS NOT NULL
+            AND contest_id > 0
+            AND problem_index IS NOT NULL
+            AND length(trim(problem_index)) > 0
+            AND verdict = 'OK'
+            AND codeforces_created_at IS NOT NULL
+            AND verified_at IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_problem_completions_user_history
+    ON problem_completions (user_id, completed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_problem_completions_problem
+    ON problem_completions (problem_id, completed_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_problem_completions_cf_submission
+    ON problem_completions (codeforces_submission_id)
+    WHERE codeforces_submission_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS codeforces_completion_checks (
+    check_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    problem_id TEXT NOT NULL REFERENCES problems(problem_key),
+    codeforces_handle TEXT NOT NULL CHECK (length(trim(codeforces_handle)) > 0),
+    assignment_id TEXT REFERENCES solo_problem_assignments(assignment_id) ON DELETE SET NULL,
+    completion_id TEXT REFERENCES problem_completions(completion_id) ON DELETE SET NULL,
+    requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TEXT,
+    cooldown_until TEXT NOT NULL,
+    result TEXT NOT NULL DEFAULT 'pending'
+        CHECK (result IN ('pending', 'verified_ok', 'no_ok', 'cooldown', 'upstream_error')),
+    response_source TEXT
+        CHECK (response_source IS NULL OR response_source IN ('cache', 'codeforces_api')),
+    latest_submission_id INTEGER,
+    latest_verdict TEXT,
+    matched_submission_id INTEGER,
+    error_code TEXT,
+    CHECK (cooldown_until >= requested_at),
+    CHECK (latest_submission_id IS NULL OR latest_submission_id > 0),
+    CHECK (matched_submission_id IS NULL OR matched_submission_id > 0),
+    CHECK (
+        (result = 'pending' AND completed_at IS NULL)
+        OR (result <> 'pending' AND completed_at IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_codeforces_completion_checks_latest
+    ON codeforces_completion_checks (user_id, problem_id, requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_codeforces_completion_checks_cooldown
+    ON codeforces_completion_checks (user_id, problem_id, cooldown_until DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_codeforces_completion_checks_pending
+    ON codeforces_completion_checks (user_id, problem_id)
+    WHERE result = 'pending';
+
 CREATE TABLE IF NOT EXISTS problem_import_batches (
     batch_id TEXT PRIMARY KEY,
     source_name TEXT NOT NULL,
@@ -1072,6 +1200,12 @@ _COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("test_cases_json", "TEXT"),
         ("test_set_hash", "TEXT"),
     ],
+    "recommendation_runs": [
+        ("owner_user_id", "TEXT REFERENCES users(user_id) ON DELETE CASCADE"),
+    ],
+    "training_plans": [
+        ("owner_user_id", "TEXT REFERENCES users(user_id) ON DELETE CASCADE"),
+    ],
 }
 
 _column_migrations_done: set[str] = set()
@@ -1085,6 +1219,45 @@ def _apply_column_migrations(conn: sqlite3.Connection, path: str) -> None:
         for name, ddl in columns:
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+    # These indexes must be created after the ALTERs above. Putting them in
+    # _SCHEMA would make startup fail on an existing volume whose old table is
+    # encountered by CREATE TABLE IF NOT EXISTS before it gains the new column.
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_recommendation_runs_owner
+        ON recommendation_runs (owner_user_id, handle, queue_date DESC)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_training_plans_owner
+        ON training_plans (owner_user_id, handle, plan_type, start_date DESC)
+        """
+    )
+    # 026: retain the legacy table while seeding the canonical, source-aware
+    # completion ledger. This is deliberately idempotent so every old Railway
+    # volume can upgrade safely even if process startup is interrupted.
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO problem_completions (
+            completion_id, user_id, problem_id, completion_source,
+            is_historical, practice_submission_id, programming_language,
+            queue_source, queue_item_id, completed_at, xp_awarded,
+            history_updated, queue_refreshed, replacement_problem_id,
+            replacement_queue_item_id
+        )
+        SELECT pc.completion_id, pc.user_id, pc.problem_id,
+               'solvex_practice_judge', 0, pc.first_submission_id,
+               ps.language, pc.source, ps.queue_item_id, pc.completed_at, 0, 1,
+               CASE WHEN pco.recommendation_id IS NULL THEN 0 ELSE 1 END,
+               pco.problem_id, pco.recommendation_id
+        FROM practice_completions pc
+        JOIN practice_submissions ps
+          ON ps.submission_id = pc.first_submission_id
+        LEFT JOIN practice_continuations pco
+          ON pco.completion_id = pc.completion_id
+        """
+    )
     conn.commit()
     _column_migrations_done.add(path)
 

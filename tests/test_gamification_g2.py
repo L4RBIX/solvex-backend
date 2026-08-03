@@ -185,7 +185,7 @@ def test_daily_quests_computed_from_product_events():
 
     quests = gamification.compute_daily_quests(events, today=TODAY)
     assert quests["date"] == TODAY.isoformat()
-    assert quests["total_count"] == 6
+    assert quests["total_count"] == 7
     assert quests["completed_count"] == 2
     by_id = {q["id"]: q for q in quests["quests"]}
     assert by_id["generate_queue_today"]["completed"] is True
@@ -193,9 +193,11 @@ def test_daily_quests_computed_from_product_events():
     assert by_id["submit_feedback_today"]["completed"] is True
     assert by_id["view_weekly_report_today"]["completed"] is False  # yesterday's report doesn't count today
     assert by_id["view_weekly_report_today"]["completed_at"] is None
+    assert by_id["complete_problem_today"]["completed"] is False
     assert set(by_id) == {
-        "complete_analysis_today", "generate_queue_today", "submit_feedback_today",
-        "view_weekly_report_today", "start_plan_today", "attempt_verification_today",
+        "complete_problem_today", "complete_analysis_today", "generate_queue_today",
+        "submit_feedback_today", "view_weekly_report_today", "start_plan_today",
+        "attempt_verification_today",
     }
 
 
@@ -356,7 +358,7 @@ def test_me_includes_g2_fields_and_stays_backward_compatible(client):
         assert key in data
     # G2 fields present.
     assert data["recent_xp_events"] == []
-    assert data["daily_quests"]["total_count"] == 6
+    assert data["daily_quests"]["total_count"] == 7
     assert data["weekly_quests"]["total_count"] == 5
     assert isinstance(data["milestones"], list)
     assert data["milestones"][0]["id"] == "next_level"
@@ -383,8 +385,9 @@ def test_quests_endpoint_shape(client):
     data = response.json()
     assert set(data.keys()) == {"subject", "daily_quests", "weekly_quests", "milestones"}
     assert {q["id"] for q in data["daily_quests"]["quests"]} == {
-        "complete_analysis_today", "generate_queue_today", "submit_feedback_today",
-        "view_weekly_report_today", "start_plan_today", "attempt_verification_today",
+        "complete_problem_today", "complete_analysis_today", "generate_queue_today",
+        "submit_feedback_today", "view_weekly_report_today", "start_plan_today",
+        "attempt_verification_today",
     }
     assert {q["id"] for q in data["weekly_quests"]["quests"]} == {
         "active_3_days_this_week", "complete_3_queues_this_week", "submit_3_feedback_this_week",

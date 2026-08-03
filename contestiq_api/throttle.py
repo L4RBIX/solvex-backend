@@ -20,6 +20,7 @@ from contestiq_api.errors import APIError
 DAILY_LIMITS: dict[str, int] = {
     "execute": 500,
     "practice_submit": 500,
+    "codeforces_completion_check": 300,
     "badge_view": 2000,
     "billing_webhook": 5000,
     "judge0_callback": 20000,

@@ -155,6 +155,9 @@ def bearer(user: dict) -> dict[str, str]:
 def record_practice_completions(user_id: str, problem_ids: set[str]) -> None:
     with store.connect() as conn:
         for problem_id in problem_ids:
+            completion_id = str(uuid.uuid4())
+            submission_id = str(uuid.uuid4())
+            now = store._now()
             conn.execute(
                 """
                 INSERT INTO practice_completions (
@@ -162,7 +165,27 @@ def record_practice_completions(user_id: str, problem_ids: set[str]) -> None:
                     first_submission_id, source, completed_at
                 ) VALUES (?, ?, ?, 'solvex_practice', ?, 'daily_queue', ?)
                 """,
-                (str(uuid.uuid4()), user_id, problem_id, str(uuid.uuid4()), store._now()),
+                (completion_id, user_id, problem_id, submission_id, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO problem_completions (
+                    completion_id, user_id, problem_id, completion_source,
+                    is_historical, practice_submission_id, programming_language,
+                    assigned_at, queue_source, completed_at, xp_awarded,
+                    history_updated, progress_updated, effects_applied_at
+                ) VALUES (?, ?, ?, 'solvex_practice_judge', 0, ?, 'python3',
+                          ?, 'daily_queue', ?, 0, 1, 1, ?)
+                """,
+                (
+                    completion_id,
+                    user_id,
+                    problem_id,
+                    submission_id,
+                    now,
+                    now,
+                    now,
+                ),
             )
 
 
@@ -294,17 +317,11 @@ def test_plans_are_materialized_and_stable():
     assert second["plan_id"] == first["plan_id"]
 
 
-def test_verified_owner_daily_materialization_is_judgeable_and_skips_practice_completions():
+def test_verified_owner_daily_materialization_skips_canonical_completions():
     default_world()
     public = planner.build_daily_queue(HANDLE, queue_date="2026-07-01")
     public_ids = [item["problem_id"] for item in public["items"]]
     assert len(public_ids) >= 2
-
-    inactive_id, incomplete_id = public_ids[:2]
-    judgeable_ids = seed_reviewed_practice_packs(
-        inactive_problem_id=inactive_id,
-        incomplete_problem_id=incomplete_id,
-    )
     owner = premium_owner()
 
     import contestiq_api.main as main
@@ -320,8 +337,6 @@ def test_verified_owner_daily_materialization_is_judgeable_and_skips_practice_co
     assert first_body["reused"] is False
     first_ids = {item["problem_id"] for item in first_body["items"]}
     assert first_ids
-    assert first_ids <= judgeable_ids
-    assert {inactive_id, incomplete_id}.isdisjoint(first_ids)
 
     record_practice_completions(owner["user_id"], first_ids)
     regenerated = client.post(
@@ -335,12 +350,11 @@ def test_verified_owner_daily_materialization_is_judgeable_and_skips_practice_co
         for item in regenerated.json()["items"]
     }
     assert regenerated_ids
-    assert regenerated_ids <= judgeable_ids
     assert first_ids.isdisjoint(regenerated_ids)
 
     # Public and authenticated non-owner planning remains the original broad
-    # Codeforces recommendation surface; private completion history and
-    # SolveX-pack availability must not affect either result.
+    # Codeforces recommendation surface; private completion history must not
+    # affect either result.
     anonymous = planner.build_daily_queue(HANDLE, queue_date="2026-07-04")
     assert [item["problem_id"] for item in anonymous["items"]] == public_ids
     stranger = auth.create_user()
@@ -352,7 +366,7 @@ def test_verified_owner_daily_materialization_is_judgeable_and_skips_practice_co
     assert [item["problem_id"] for item in non_owner["items"]] == public_ids
 
 
-def test_verified_owner_7_and_14_day_materializations_apply_practice_scope():
+def test_verified_owner_7_and_14_day_materializations_skip_canonical_completions():
     default_world()
     public = planner.build_plan(HANDLE, "7_day", start_date="2026-06-01")
     public_ids = [
@@ -361,12 +375,6 @@ def test_verified_owner_7_and_14_day_materializations_apply_practice_scope():
         for item in day["items"]
     ]
     assert len(public_ids) >= 2
-
-    inactive_id, incomplete_id = public_ids[:2]
-    judgeable_ids = seed_reviewed_practice_packs(
-        inactive_problem_id=inactive_id,
-        incomplete_problem_id=incomplete_id,
-    )
     owner = premium_owner()
 
     import contestiq_api.main as main
@@ -384,8 +392,6 @@ def test_verified_owner_7_and_14_day_materializations_apply_practice_scope():
         for item in day["items"]
     }
     assert first_ids
-    assert first_ids <= judgeable_ids
-    assert {inactive_id, incomplete_id}.isdisjoint(first_ids)
 
     record_practice_completions(owner["user_id"], first_ids)
     second_7 = client.post(
@@ -407,7 +413,6 @@ def test_verified_owner_7_and_14_day_materializations_apply_practice_scope():
             for item in day["items"]
         }
         assert selected
-        assert selected <= judgeable_ids
         assert first_ids.isdisjoint(selected)
 
     anonymous = planner.build_plan(HANDLE, "7_day", start_date="2026-06-05")
