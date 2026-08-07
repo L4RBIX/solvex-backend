@@ -220,6 +220,12 @@ class StatementHtmlUpsertRequest(BaseModel):
     force: bool = False
 
 
+@router.get("/statements/relay/health")
+def statement_relay_health(admin: dict[str, Any] = Depends(auth.require_admin)):
+    auth.audit(admin["actor"], "statement_relay_health", None, {})
+    return store.statement_relay_observability()
+
+
 @router.get("/statements/ingest/stats")
 def statement_ingest_stats(admin: dict[str, Any] = Depends(auth.require_admin)):
     auth.audit(admin["actor"], "statement_ingest_stats", None, {})
