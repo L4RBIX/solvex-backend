@@ -97,10 +97,52 @@ async def _maybe_auto_seed_catalog(diag: dict[str, object]) -> None:
         logger.exception("auto_seed_catalog_on_startup failed")
 
 
+async def _periodic_codeforces_catalog_sync() -> None:
+    """Keep CF_CURRENT ⊆ SOLVEX_CATALOG without a separate cron service.
+
+    Interval is CODEFORCES_CATALOG_SYNC_INTERVAL_HOURS (default 6). Set to 0 to
+    disable. Uses force=True so TTL cannot leave the catalog stale for weeks.
+    """
+    interval_hours = float(settings.codeforces_catalog_sync_interval_hours or 0.0)
+    if interval_hours <= 0:
+        logger.info("periodic_codeforces_catalog_sync disabled (interval_hours<=0)")
+        return
+
+    from contestiq_api.cfdata import sync as cf_sync
+
+    # Stagger first run so deploy health checks are not competing with CF I/O.
+    await asyncio.sleep(min(90.0, interval_hours * 3600 * 0.01))
+    while True:
+        try:
+            result = await asyncio.to_thread(cf_sync.sync_problemset, True)
+            catalog = (result or {}).get("catalog_sync") or {}
+            logger.info(
+                json.dumps(
+                    {
+                        "event": "periodic_codeforces_catalog_sync",
+                        "refetched": (result or {}).get("refetched"),
+                        "status": (result or {}).get("status"),
+                        **catalog,
+                    },
+                    default=str,
+                )
+            )
+            if catalog.get("missing_from_solvex_after"):
+                logger.error(
+                    "catalog parity gap after sync: missing_from_solvex_after=%s sample=%s",
+                    catalog.get("missing_from_solvex_after"),
+                    catalog.get("cf_only_ids_sample"),
+                )
+        except Exception:
+            logger.exception("periodic_codeforces_catalog_sync failed")
+        await asyncio.sleep(max(60.0, interval_hours * 3600))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     diag = _log_storage_diagnostics()
     asyncio.create_task(_maybe_auto_seed_catalog(diag))
+    asyncio.create_task(_periodic_codeforces_catalog_sync())
     yield
 
 

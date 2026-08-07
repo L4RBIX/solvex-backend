@@ -33,9 +33,11 @@ Secrets live only in the platform env managers (Railway/Vercel). CI runs
 4. Deploy backend: `uvicorn contestiq_api.main:app --workers 2` (or platform
    equivalent). Sync/analysis run in-request today — 2–4 workers is enough for
    beta scale (see load report).
-5. Scheduled jobs (platform cron or GitHub Actions cron hitting admin endpoints):
+5. Scheduled jobs (platform cron or GitHub Actions cron hitting endpoints):
    - every 2 min: `POST /api/v1/verification/reconcile` (missed Judge0 callbacks);
-   - daily: `POST /api/v1/sync/problemset` (TTL makes this cheap);
+   - every 6 hours (in-process + `.github/workflows/sync-codeforces-catalog.yml`):
+     `POST /api/v1/sync/problemset` with `{"force": true}` so
+     `CF_CURRENT ⊆ SOLVEX_CATALOG` (Gym excluded; official problemset only);
    - weekly (Mon 06:00 UTC): `POST /api/v1/admin/jobs/weekly-reports`.
 6. Backups: Supabase PITR/daily snapshots on (production); if running SQLite
    anywhere, cron-copy `DATABASE_PATH` off-box daily.

@@ -151,7 +151,9 @@ class Settings:
     # Codeforces client pacing
     codeforces_rate_limit_seconds: float = 2.0
     codeforces_max_retries: int = 3
-    codeforces_problemset_ttl_hours: int = 24
+    codeforces_problemset_ttl_hours: int = 6
+    # Background catalog parity sync interval (hours). 0 disables the loop.
+    codeforces_catalog_sync_interval_hours: float = 6.0
     # Billing (Phase 06): default provider name for checkout
     billing_provider: str = "manual"
     billing_api_key: str = ""
@@ -234,7 +236,10 @@ def get_settings() -> Settings:
         database_path=(os.getenv("DATABASE_PATH") or "api_cache/backend_jobs.db").strip(),
         codeforces_rate_limit_seconds=_parse_float(os.getenv("CODEFORCES_RATE_LIMIT_SECONDS"), 2.0),
         codeforces_max_retries=_parse_int(os.getenv("CODEFORCES_MAX_RETRIES"), 3),
-        codeforces_problemset_ttl_hours=_parse_int(os.getenv("CODEFORCES_PROBLEMSET_TTL_HOURS"), 24),
+        codeforces_problemset_ttl_hours=_parse_int(os.getenv("CODEFORCES_PROBLEMSET_TTL_HOURS"), 6),
+        codeforces_catalog_sync_interval_hours=_parse_float(
+            os.getenv("CODEFORCES_CATALOG_SYNC_INTERVAL_HOURS"), 6.0
+        ),
         billing_provider=os.getenv("BILLING_PROVIDER") or "manual",
         billing_api_key=os.getenv("BILLING_API_KEY") or "",
         billing_webhook_secret=os.getenv("BILLING_WEBHOOK_SECRET") or "",

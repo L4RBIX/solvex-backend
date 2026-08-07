@@ -1,0 +1,26 @@
+name: Sync Codeforces catalog
+
+# External redundancy for the in-process 6h loop on Railway.
+# Hits the public problemset sync endpoint with force=true.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Force Codeforces catalog sync
+        env:
+          SOLVEX_API_BASE: ${{ vars.SOLVEX_API_BASE || 'https://web-production-3ea15.up.railway.app' }}
+        run: |
+          set -euo pipefail
+          echo "POST $SOLVEX_API_BASE/api/v1/sync/problemset"
+          resp=$(curl -sS -X POST "$SOLVEX_API_BASE/api/v1/sync/problemset" \
+            -H 'Content-Type: application/json' \
+            -d '{"force": true}')
+          echo "$resp" | python3 -m json.tool
+          missing=$(echo "$resp" | python3 -c 'import sys,json; d=json.load(sys.stdin); print((d.get("catalog_sync") or {}).get("missing_from_solvex_after", 1))')
+          test "$missing" = "0"

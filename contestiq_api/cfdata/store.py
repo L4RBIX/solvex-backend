@@ -1315,16 +1315,71 @@ def get_normalized_submission(submission_id: int) -> dict[str, Any] | None:
 # ─── Problemset ──────────────────────────────────────────────────────────────
 
 
-def save_problemset_snapshot(raw: dict[str, Any]) -> dict[str, int]:
+def save_problemset_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
+    """Upsert CF ``problemset.problems`` into the canonical catalog.
+
+    Never deletes historical rows. Returns counts plus newly inserted keys so
+    callers can enqueue statement-pending stubs without a second scan.
+    """
     now = _now()
     problems = raw.get("problems", [])
     stats = raw.get("problemStatistics", [])
+    new_problem_ids: list[str] = []
+    updated_problems = 0
+    unchanged_problems = 0
+    skipped_malformed = 0
+
     with connect() as conn:
         conn.execute(
             "INSERT INTO cf_problemset_raw (id, raw_json, fetched_at, problem_count) VALUES (?, ?, ?, ?)",
             (str(uuid.uuid4()), json.dumps(raw, ensure_ascii=False), now, len(problems)),
         )
         for problem in problems:
+            if not isinstance(problem, dict):
+                skipped_malformed += 1
+                continue
+            contest_id = problem.get("contestId")
+            problem_index = problem.get("index")
+            if contest_id is None or not isinstance(problem_index, str) or not problem_index.strip():
+                skipped_malformed += 1
+                continue
+            try:
+                key = stable_problem_key(problem)
+            except Exception:
+                skipped_malformed += 1
+                continue
+            # Canonical CF identities are contestId+index only — reject fallback keys.
+            expected = f"{contest_id}{problem_index.strip()}"
+            if not key or key != expected:
+                skipped_malformed += 1
+                continue
+
+            name = problem.get("name") or "Unknown"
+            rating = problem.get("rating")
+            tags_json = json.dumps(problem.get("tags") or [], ensure_ascii=False)
+            problemset_name = problem.get("problemsetName")
+
+            existing = conn.execute(
+                "SELECT name, rating, tags, contest_id, problem_index, problemset_name FROM problems WHERE problem_key = ?",
+                (key,),
+            ).fetchone()
+            if existing is None:
+                new_problem_ids.append(key)
+            else:
+                existing_tags = existing["tags"] or "[]"
+                same = (
+                    existing["name"] == name
+                    and existing["rating"] == rating
+                    and existing_tags == tags_json
+                    and existing["contest_id"] == contest_id
+                    and existing["problem_index"] == problem_index
+                    and existing["problemset_name"] == problemset_name
+                )
+                if same:
+                    unchanged_problems += 1
+                else:
+                    updated_problems += 1
+
             conn.execute(
                 """
                 INSERT INTO problems (problem_key, contest_id, problem_index, name, rating, tags, problemset_name, updated_at)
@@ -1339,17 +1394,25 @@ def save_problemset_snapshot(raw: dict[str, Any]) -> dict[str, int]:
                     updated_at=excluded.updated_at
                 """,
                 (
-                    stable_problem_key(problem),
-                    problem.get("contestId"),
-                    problem.get("index"),
-                    problem.get("name", "Unknown"),
-                    problem.get("rating"),
-                    json.dumps(problem.get("tags") or [], ensure_ascii=False),
-                    problem.get("problemsetName"),
+                    key,
+                    contest_id,
+                    problem_index,
+                    name,
+                    rating,
+                    tags_json,
+                    problemset_name,
                     now,
                 ),
             )
         for stat in stats:
+            if not isinstance(stat, dict):
+                continue
+            try:
+                key = stable_problem_key(stat)
+            except Exception:
+                continue
+            if not key:
+                continue
             conn.execute(
                 """
                 INSERT INTO problem_statistics (problem_key, solved_count, updated_at)
@@ -1358,9 +1421,100 @@ def save_problemset_snapshot(raw: dict[str, Any]) -> dict[str, int]:
                     solved_count=excluded.solved_count,
                     updated_at=excluded.updated_at
                 """,
-                (stable_problem_key(stat), stat.get("solvedCount"), now),
+                (key, stat.get("solvedCount"), now),
             )
-    return {"problems": len(problems), "statistics": len(stats)}
+
+    stub_count = ensure_statement_pending_stubs(new_problem_ids)
+    return {
+        "problems": len(problems),
+        "statistics": len(stats),
+        "new_problems": len(new_problem_ids),
+        "updated_problems": updated_problems,
+        "unchanged_problems": unchanged_problems,
+        "skipped_malformed": skipped_malformed,
+        "new_problem_ids": new_problem_ids,
+        "statement_stubs_created": stub_count,
+    }
+
+
+def ensure_statement_pending_stubs(problem_ids: list[str]) -> int:
+    """Insert ``missing`` statement rows for new catalog IDs lacking content.
+
+    Catalog membership must not depend on statement ingestion. These stubs keep
+    availability explicit (pending/missing, not Arena-capable) until a verified
+    archive import fills display-ready content. Existing statement rows are never
+    overwritten.
+    """
+    if not problem_ids:
+        return 0
+    now = _now()
+    batch_id = "cf-catalog-sync"
+    created = 0
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO problem_import_batches
+                (batch_id, source_name, source_sha256, status, started_at)
+            VALUES (?, 'codeforces-catalog-sync', 'n/a', 'completed', ?)
+            """,
+            (batch_id, now),
+        )
+        for problem_id in problem_ids:
+            if not problem_id:
+                continue
+            existing = conn.execute(
+                "SELECT 1 FROM problem_statements WHERE problem_id = ?",
+                (problem_id,),
+            ).fetchone()
+            if existing is not None:
+                continue
+            conn.execute(
+                """
+                INSERT INTO problem_statements (
+                    problem_id, batch_id, content_hash, title, statement,
+                    input_format, output_format, interaction_format, notes, samples,
+                    time_limit_seconds, memory_limit_megabytes, difficulty, io_mode,
+                    is_interactive, picture_count, has_missing_diagrams,
+                    availability_status, display_ready, solve_ready, unavailable_reason,
+                    source_dataset, source_urls, statement_relation, shared_statement_from,
+                    imported_at
+                ) VALUES (
+                    ?, ?, ?, NULL, NULL,
+                    NULL, NULL, NULL, NULL, '[]',
+                    NULL, NULL, NULL, NULL,
+                    0, NULL, 0,
+                    'missing', 0, 0, 'Statement not available in SolveX yet.',
+                    NULL, '[]', NULL, NULL, ?
+                )
+                """,
+                (problem_id, batch_id, f"pending-{problem_id}", now),
+            )
+            created += 1
+    return created
+
+
+def list_problem_keys() -> set[str]:
+    with connect() as conn:
+        rows = conn.execute("SELECT problem_key FROM problems").fetchall()
+    return {row["problem_key"] for row in rows}
+
+
+def catalog_parity_report(cf_problem_ids: set[str] | list[str]) -> dict[str, Any]:
+    """Compare an authoritative CF identity set against the local catalog."""
+    cf_ids = {str(pid) for pid in cf_problem_ids if pid}
+    local = list_problem_keys()
+    cf_only = sorted(cf_ids - local)
+    solvex_only = sorted(local - cf_ids)
+    return {
+        "cf_total": len(cf_ids),
+        "solvex_total": len(local),
+        "matched": len(cf_ids & local),
+        "missing_from_solvex": len(cf_only),
+        "extra_historical_solvex": len(solvex_only),
+        "cf_only_ids": cf_only,
+        "solvex_only_ids": solvex_only,
+        "missing_from_solvex_after": len(cf_only),
+    }
 
 
 def latest_problemset_snapshot() -> dict[str, Any] | None:

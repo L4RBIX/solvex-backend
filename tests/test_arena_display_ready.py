@@ -66,24 +66,48 @@ def _seed_statement(problem_id: str, **overrides) -> None:
             " VALUES (?, 'test-archive.zip', 'deadbeef', 'completed', ?)",
             (payload["batch_id"], now),
         )
-        conn.execute(
-            """
-            INSERT INTO problem_statements (
-                problem_id, batch_id, content_hash, title, statement, input_format, output_format,
-                interaction_format, notes, samples, time_limit_seconds, memory_limit_megabytes,
-                difficulty, io_mode, is_interactive, picture_count, has_missing_diagrams,
-                availability_status, display_ready, solve_ready, unavailable_reason,
-                source_dataset, source_urls, statement_relation, shared_statement_from, imported_at
-            ) VALUES (
-                :problem_id, :batch_id, :content_hash, :title, :statement, :input_format, :output_format,
-                :interaction_format, :notes, :samples, :time_limit_seconds, :memory_limit_megabytes,
-                :difficulty, :io_mode, :is_interactive, :picture_count, :has_missing_diagrams,
-                :availability_status, :display_ready, :solve_ready, :unavailable_reason,
-                :source_dataset, :source_urls, :statement_relation, :shared_statement_from, :imported_at
+        existing = conn.execute(
+            "SELECT 1 FROM problem_statements WHERE problem_id = ?",
+            (problem_id,),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE problem_statements SET
+                    batch_id=:batch_id, content_hash=:content_hash, title=:title, statement=:statement,
+                    input_format=:input_format, output_format=:output_format,
+                    interaction_format=:interaction_format, notes=:notes, samples=:samples,
+                    time_limit_seconds=:time_limit_seconds, memory_limit_megabytes=:memory_limit_megabytes,
+                    difficulty=:difficulty, io_mode=:io_mode, is_interactive=:is_interactive,
+                    picture_count=:picture_count, has_missing_diagrams=:has_missing_diagrams,
+                    availability_status=:availability_status, display_ready=:display_ready,
+                    solve_ready=:solve_ready, unavailable_reason=:unavailable_reason,
+                    source_dataset=:source_dataset, source_urls=:source_urls,
+                    statement_relation=:statement_relation, shared_statement_from=:shared_statement_from,
+                    imported_at=:imported_at
+                WHERE problem_id=:problem_id
+                """,
+                payload,
             )
-            """,
-            payload,
-        )
+        else:
+            conn.execute(
+                """
+                INSERT INTO problem_statements (
+                    problem_id, batch_id, content_hash, title, statement, input_format, output_format,
+                    interaction_format, notes, samples, time_limit_seconds, memory_limit_megabytes,
+                    difficulty, io_mode, is_interactive, picture_count, has_missing_diagrams,
+                    availability_status, display_ready, solve_ready, unavailable_reason,
+                    source_dataset, source_urls, statement_relation, shared_statement_from, imported_at
+                ) VALUES (
+                    :problem_id, :batch_id, :content_hash, :title, :statement, :input_format, :output_format,
+                    :interaction_format, :notes, :samples, :time_limit_seconds, :memory_limit_megabytes,
+                    :difficulty, :io_mode, :is_interactive, :picture_count, :has_missing_diagrams,
+                    :availability_status, :display_ready, :solve_ready, :unavailable_reason,
+                    :source_dataset, :source_urls, :statement_relation, :shared_statement_from, :imported_at
+                )
+                """,
+                payload,
+            )
 
 
 def test_is_arena_solvable_requires_display_ready_statement():
@@ -97,7 +121,9 @@ def test_is_arena_solvable_requires_display_ready_statement():
         }
     )
     assert store.get_problem("2228B") is not None
-    assert store.get_problem_statement("2228B") is None
+    stub = store.get_problem_statement("2228B")
+    assert stub is not None
+    assert bool(stub["display_ready"]) is False
     assert is_arena_solvable("2228B") is False
 
 
