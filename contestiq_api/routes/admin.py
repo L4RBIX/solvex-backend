@@ -611,6 +611,34 @@ def launch_dashboard(admin: dict[str, Any] = Depends(auth.require_admin)):
     }
 
 
+@router.get("/practice-packs/coverage")
+def practice_pack_coverage(admin: dict[str, Any] = Depends(auth.require_admin)):
+    from contestiq_api.practice_packs.pipeline import coverage_snapshot
+
+    return coverage_snapshot()
+
+
+@router.post("/practice-packs/activate-oracles")
+def practice_pack_activate_oracles(admin: dict[str, Any] = Depends(auth.require_admin)):
+    from contestiq_api.practice_packs import pipeline as pack_pipeline
+
+    # Allow re-seed in this process after deploy.
+    pack_pipeline._auto_packs_seeded = False
+    result = pack_pipeline.activate_oracle_packs()
+    auth.audit(
+        admin["user_id"],
+        "practice_packs.activate_oracles",
+        "practice_pack",
+        None,
+        {
+            "activated": result["activated"],
+            "failed_count": len(result["failed"]),
+            "skipped": result["skipped"],
+        },
+    )
+    return result
+
+
 @router.get("/audit-log")
 def audit_log(limit: int = Query(default=50, ge=1, le=500), admin: dict[str, Any] = Depends(auth.require_admin)):
     with store.connect() as conn:

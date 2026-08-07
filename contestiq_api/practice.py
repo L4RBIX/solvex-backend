@@ -114,6 +114,9 @@ def _request_hash(
 def _active_pack(problem_id: str) -> dict[str, Any]:
     """Load exactly one active pack whose problem identity matches the route payload."""
     duels.seed_builtin_duel_problem_packs()
+    from contestiq_api.practice_packs.pipeline import ensure_auto_packs_seeded
+
+    ensure_auto_packs_seeded()
     with store.connect() as conn:
         row = conn.execute(
             """
@@ -146,6 +149,7 @@ def _active_pack(problem_id: str) -> dict[str, Any]:
         )
     pack["tests"] = tests
     pack["test_set_hash"] = duels._tests_hash(tests)
+    pack["checker_type"] = pack.get("checker_type") or "exact"
     return pack
 
 
@@ -199,6 +203,7 @@ async def _judge_pack(
                 source_code=source_code,
                 stdin=test["input"],
                 expected_output=test["expected_output"],
+                checker_type=str(pack.get("checker_type") or "exact"),
             )
             results.append(result)
             status = str(result.get("status") or "error")

@@ -69,10 +69,10 @@ def _b64dec(s: object) -> str:
         raise Judge0ResultError("failed to decode base64 execution field") from exc
 
 
-def _outputs_match(actual: str, expected: str) -> bool:
-    def lines(s: str) -> list[str]:
-        return [ln.rstrip() for ln in s.replace("\r\n", "\n").rstrip("\n").split("\n")]
-    return lines(actual) == lines(expected)
+def _outputs_match(actual: str, expected: str, *, checker_type: str | None = "exact") -> bool:
+    from contestiq_api.practice_packs.checkers import outputs_match
+
+    return outputs_match(actual, expected, checker_type=checker_type or "exact")
 
 
 def _token_sha(token: str) -> str:
@@ -91,6 +91,7 @@ async def run_submission(
     execution_id: str | None = None,
     source_sha256: str | None = None,
     stdin_sha256: str | None = None,
+    checker_type: str | None = "exact",
 ) -> dict[str, Any]:
     """Submit code to Judge0, poll until final, return normalised result."""
     headers: dict[str, str] = {
@@ -190,7 +191,7 @@ async def run_submission(
     )
 
     if solvex_status == "accepted" and expected_output is not None:
-        if not _outputs_match(stdout, expected_output):
+        if not _outputs_match(stdout, expected_output, checker_type=checker_type):
             solvex_status = "wrong_answer"
             # The normalized status must remain internally consistent even
             # though Judge0 itself reported process success (3).
