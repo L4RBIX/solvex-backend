@@ -111,15 +111,37 @@ def sync_handle(handle: str, force_full: bool = False, client: CodeforcesClient 
 
 
 def sync_problemset(force: bool = False, client: CodeforcesClient | None = None) -> dict[str, Any]:
-    """Global problemset sync, skipped while the latest snapshot is within the TTL."""
+    """Global problemset sync, skipped while the latest snapshot is within the TTL.
+
+    Scope: official Codeforces ``problemset.problems`` only (not Gym). Writes are
+    upsert-only. New identities get statement-pending stubs; Arena capability is
+    unchanged until display-ready content is imported.
+    """
+    import time
+
+    from contestiq_core.codeforces.normalizer import stable_problem_key
+
+    started = time.monotonic()
     snapshot = store.latest_problemset_snapshot()
     ttl_hours = get_settings().codeforces_problemset_ttl_hours
+    solvex_before = store.problem_counts()["problems"]
     if snapshot is not None and not force and not _snapshot_expired(snapshot["fetched_at"], ttl_hours):
         return {
             "status": "fresh",
             "fetched_at": snapshot["fetched_at"],
             "problem_count": snapshot["problem_count"],
             "refetched": False,
+            "catalog_sync": {
+                "cf_total": snapshot["problem_count"],
+                "solvex_before": solvex_before,
+                "solvex_after": solvex_before,
+                "new_problems": 0,
+                "updated_problems": 0,
+                "unchanged": 0,
+                "missing_from_solvex_after": 0,
+                "sync_duration_ms": round((time.monotonic() - started) * 1000, 2),
+                "errors": [],
+            },
         }
 
     active = store.find_active_sync_job(None, sync_type="problemset")
@@ -129,17 +151,53 @@ def sync_problemset(force: bool = False, client: CodeforcesClient | None = None)
     client = client or CodeforcesClient()
     job = store.create_sync_job("problemset", None)
     store.mark_sync_running(job["id"])
+    errors: list[str] = []
     try:
         result = client.get_problemset()
-        counts = store.save_problemset_snapshot(result.data or {})
-        stats = {**counts, "used_stale_cache": result.stale}
+        raw = result.data or {}
+        problems = raw.get("problems") or []
+        if not isinstance(problems, list):
+            problems = []
+            errors.append("problemset.problems was not a list")
+        cf_ids = set()
+        for problem in problems:
+            if not isinstance(problem, dict):
+                continue
+            try:
+                key = stable_problem_key(problem)
+            except Exception:
+                continue
+            if key:
+                cf_ids.add(key)
+        counts = store.save_problemset_snapshot(raw if isinstance(raw, dict) else {})
+        parity = store.catalog_parity_report(cf_ids)
+        solvex_after = store.problem_counts()["problems"]
+        catalog_sync = {
+            "cf_total": parity["cf_total"],
+            "solvex_before": solvex_before,
+            "new_problems": counts.get("new_problems", 0),
+            "updated_problems": counts.get("updated_problems", 0),
+            "unchanged": counts.get("unchanged_problems", 0),
+            "skipped_malformed": counts.get("skipped_malformed", 0),
+            "statement_stubs_created": counts.get("statement_stubs_created", 0),
+            "solvex_after": solvex_after,
+            "missing_from_solvex_after": parity["missing_from_solvex_after"],
+            "extra_historical_solvex": parity["extra_historical_solvex"],
+            "cf_only_ids_sample": (parity.get("cf_only_ids") or [])[:40],
+            "sync_duration_ms": round((time.monotonic() - started) * 1000, 2),
+            "errors": errors,
+            "used_stale_cache": result.stale,
+        }
+        stats = {**counts, "used_stale_cache": result.stale, "catalog_sync": catalog_sync}
+        # Drop bulky id lists from persisted job stats.
+        stats.pop("new_problem_ids", None)
         store.finish_sync_job(job["id"], "stale_cache_used" if result.stale else "success", stats=stats)
     except Exception as exc:
         store.finish_sync_job(job["id"], "failed", error_message=str(exc))
         raise
     finished = store.get_sync_job(job["id"])
     assert finished is not None
-    return {**finished, "refetched": True}
+    return {**finished, "refetched": True, "catalog_sync": finished.get("stats", {}).get("catalog_sync")}
 
 
 def _snapshot_expired(fetched_at: str, ttl_hours: int) -> bool:

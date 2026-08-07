@@ -199,10 +199,11 @@ def _seed_statement(problem_id: str, **overrides) -> None:
     payload.update(overrides)
     with store.connect() as conn:
         conn.execute(
-            "INSERT INTO problem_import_batches (batch_id, source_name, source_sha256, status, started_at)"
+            "INSERT OR IGNORE INTO problem_import_batches (batch_id, source_name, source_sha256, status, started_at)"
             " VALUES (?, 'test-archive.zip', 'deadbeef', 'completed', ?)",
             (payload["batch_id"], now),
         )
+        conn.execute("DELETE FROM problem_statements WHERE problem_id = ?", (problem_id,))
         conn.execute(
             """
             INSERT INTO problem_statements (
