@@ -33,6 +33,7 @@ from contestiq_api.routes import (
     problems,
     practice,
     recommendations,
+    relay,
     share,
     sync,
     v1,
@@ -139,22 +140,14 @@ async def _periodic_codeforces_catalog_sync() -> None:
 
 
 async def _periodic_statement_ingest() -> None:
-    """Keep the statement ingest queue primed for the external HTML relay.
-
-    Direct Codeforces fetches from Railway are usually Cloudflare-blocked, so
-    this loop:
-    1. enqueues missing/non-display-ready IDs (newest first)
-    2. optionally drains via direct fetch when STATEMENT_INGEST_DIRECT_FETCH=1
-
-    The GitHub Actions workflow (ingest-statements.yml) fetches official pages
-    elsewhere and POSTs HTML to /api/v1/admin/statements/ingest-html.
-    """
+    """Prime the statement ingest queue on a slow cadence."""
     interval_hours = float(settings.statement_ingest_interval_hours or 0.0)
     if interval_hours <= 0:
         logger.info("periodic_statement_ingest disabled (interval_hours<=0)")
         return
 
     from contestiq_api.cfdata import statement_ingest
+    from contestiq_api.cfdata import store as cf_store
 
     await asyncio.sleep(min(180.0, max(30.0, interval_hours * 3600 * 0.05)))
     while True:
@@ -165,31 +158,165 @@ async def _periodic_statement_ingest() -> None:
                 reason="periodic_enqueue",
                 only_missing=True,
             )
-            logger.info(json.dumps({"event": "statement_ingest_enqueue", **queued}, default=str))
-            if settings.statement_ingest_direct_fetch:
-                report = await asyncio.to_thread(statement_ingest.process_statement_ingest_batch)
-                logger.info(
-                    json.dumps({"event": "periodic_statement_ingest", **report}, default=str)
+            logger.info(
+                json.dumps(
+                    {
+                        "event": "statement_ingest_enqueue",
+                        **queued,
+                        "relay_observability": cf_store.statement_relay_observability(),
+                    },
+                    default=str,
                 )
-            else:
-                from contestiq_api.cfdata import store as cf_store
-
-                logger.info(
-                    json.dumps(
-                        {
-                            "event": "periodic_statement_ingest_waiting_for_relay",
-                            "enqueued": queued,
-                            "queue": cf_store.statement_ingest_queue_stats(),
-                            "display_ready": cf_store.arena_catalog_coverage_stats().get(
-                                "display_ready"
-                            ),
-                        },
-                        default=str,
-                    )
-                )
+            )
         except Exception:
             logger.exception("periodic_statement_ingest failed")
         await asyncio.sleep(max(60.0, interval_hours * 3600))
+
+
+async def _embedded_statement_relay() -> None:
+    """24/7 in-process statement fetch relay (Railway-hosted).
+
+    Uses curl_cffi chrome116 which currently reaches Codeforces from Railway.
+    Communicates through the same lease/result store path as the HTTP relay API.
+    """
+    if not settings.statement_relay_embedded:
+        logger.info("embedded statement relay disabled")
+        return
+    if not (settings.statement_relay_token or "").strip():
+        logger.info("embedded statement relay idle (STATEMENT_RELAY_TOKEN unset)")
+        return
+
+    from contestiq_api.cfdata import statement_fetch
+    from contestiq_api.cfdata import statement_html
+    from contestiq_api.cfdata import statement_ingest
+    from contestiq_api.cfdata import store as cf_store
+
+    relay_id = "railway-embedded"
+    version = "embedded-1.0.0"
+    await asyncio.sleep(20)
+    logger.info(json.dumps({"event": "embedded_statement_relay_start", "relay_id": relay_id}))
+    while True:
+        try:
+            cf_store.upsert_relay_heartbeat(relay_id, version=version, note="embedded")
+            cf_store.enqueue_statement_ingest(
+                cf_store.list_non_display_ready_problem_ids()[:200],
+                reason="embedded_prime",
+            )
+            jobs = cf_store.lease_next_statement_jobs(
+                limit=1,
+                relay_id=relay_id,
+                lease_seconds=int(settings.statement_relay_lease_seconds or 600),
+            )
+            if not jobs:
+                await asyncio.sleep(20)
+                continue
+            job = jobs[0]
+            problem_id = job["problem_id"]
+            try:
+                fetched = await asyncio.to_thread(
+                    statement_fetch.fetch_problem_html,
+                    int(job["contest_id"]),
+                    str(job["index"]),
+                )
+            except Exception as exc:
+                cf_store.record_statement_job_result(
+                    problem_id,
+                    relay_id=relay_id,
+                    ok=False,
+                    error=str(exc)[:400],
+                    failure_class="retryable",
+                )
+                cf_store.bump_statement_ingest_failure(
+                    problem_id,
+                    error=str(exc)[:400],
+                    next_attempt_at=_relay_backoff_iso(job.get("attempt") or 1),
+                )
+                cf_store.upsert_relay_heartbeat(relay_id, failed=True)
+                await asyncio.sleep(float(settings.statement_ingest_rate_limit_seconds or 3))
+                continue
+
+            html = fetched.text
+            usable = fetched.status_code == 200 and "problem-statement" in html
+            if not usable:
+                failure_class = "blocked" if (
+                    fetched.status_code in {401, 403}
+                    or statement_html.is_cloudflare_or_challenge_page(html)
+                ) else ("permanent" if fetched.status_code == 404 else "retryable")
+                cf_store.record_statement_job_result(
+                    problem_id,
+                    relay_id=relay_id,
+                    ok=False,
+                    http_status=fetched.status_code,
+                    final_url=fetched.url,
+                    error=f"unusable_fetch:{fetched.status_code}",
+                    failure_class=failure_class,
+                )
+                if failure_class == "permanent":
+                    cf_store.finish_statement_ingest(
+                        problem_id, status="failed", detail="permanent fetch failure"
+                    )
+                else:
+                    cf_store.bump_statement_ingest_failure(
+                        problem_id,
+                        error=f"unusable_fetch:{fetched.status_code}",
+                        next_attempt_at=_relay_backoff_iso(
+                            job.get("attempt") or 1, blocked=(failure_class == "blocked")
+                        ),
+                    )
+                cf_store.upsert_relay_heartbeat(
+                    relay_id,
+                    blocked=(failure_class == "blocked"),
+                    failed=(failure_class != "blocked"),
+                )
+                await asyncio.sleep(float(settings.statement_ingest_rate_limit_seconds or 3))
+                continue
+
+            cf_store.record_statement_job_result(
+                problem_id,
+                relay_id=relay_id,
+                ok=True,
+                html=html,
+                http_status=fetched.status_code,
+                final_url=fetched.url,
+            )
+            outcome = await asyncio.to_thread(
+                lambda pid=problem_id, body=html: statement_ingest.ingest_one(pid, html=body)
+            )
+            status = outcome.get("status") or "failed"
+            cf_store.finish_statement_ingest(
+                problem_id,
+                status=status if status != "skipped" else "succeeded",
+            )
+            cf_store.upsert_relay_heartbeat(
+                relay_id,
+                successful_fetch=status in {"succeeded", "partial", "asset_required"},
+                failed=status == "failed",
+            )
+            logger.info(
+                json.dumps(
+                    {
+                        "event": "embedded_statement_relay_ingest",
+                        "problem_id": problem_id,
+                        "status": status,
+                        "display_ready": outcome.get("display_ready"),
+                    },
+                    default=str,
+                )
+            )
+            await asyncio.sleep(float(settings.statement_ingest_rate_limit_seconds or 3))
+        except Exception:
+            logger.exception("embedded statement relay loop error")
+            await asyncio.sleep(30)
+
+
+def _relay_backoff_iso(attempts: int, *, blocked: bool = False) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    table = {1: 300, 2: 900, 3: 3600, 4: 21600}
+    seconds = float(table.get(int(attempts), 86400))
+    if blocked:
+        seconds = max(seconds, 3600.0)
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
 
 
 @asynccontextmanager
@@ -198,6 +325,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_maybe_auto_seed_catalog(diag))
     asyncio.create_task(_periodic_codeforces_catalog_sync())
     asyncio.create_task(_periodic_statement_ingest())
+    asyncio.create_task(_embedded_statement_relay())
     yield
 
 
@@ -277,6 +405,7 @@ app.include_router(weakness.router)
 app.include_router(recommendations.router)
 app.include_router(billing.router)
 app.include_router(admin.router)
+app.include_router(relay.router)
 app.include_router(verification.router)
 app.include_router(b2b.router)
 app.include_router(analysis.router)

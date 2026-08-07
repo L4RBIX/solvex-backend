@@ -1047,10 +1047,27 @@ CREATE TABLE IF NOT EXISTS statement_ingest_queue (
     discovered_at TEXT NOT NULL,
     started_at TEXT,
     completed_at TEXT,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    leased_until TEXT,
+    leased_by TEXT,
+    failure_class TEXT,
+    last_http_status INTEGER,
+    last_fetch_url TEXT,
+    fetch_content_hash TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_statement_ingest_queue_status_next
     ON statement_ingest_queue (status, next_attempt_at, priority_contest_id DESC);
+
+CREATE TABLE IF NOT EXISTS statement_relay_heartbeats (
+    relay_id TEXT PRIMARY KEY,
+    version TEXT,
+    last_seen_at TEXT NOT NULL,
+    last_successful_fetch_at TEXT,
+    jobs_succeeded INTEGER NOT NULL DEFAULT 0,
+    jobs_failed INTEGER NOT NULL DEFAULT 0,
+    jobs_blocked INTEGER NOT NULL DEFAULT 0,
+    note TEXT
+);
 """
 
 
@@ -1089,6 +1106,14 @@ _COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("test_cases_json", "TEXT"),
         ("test_set_hash", "TEXT"),
     ],
+    "statement_ingest_queue": [
+        ("leased_until", "TEXT"),
+        ("leased_by", "TEXT"),
+        ("failure_class", "TEXT"),
+        ("last_http_status", "INTEGER"),
+        ("last_fetch_url", "TEXT"),
+        ("fetch_content_hash", "TEXT"),
+    ],
 }
 
 _column_migrations_done: set[str] = set()
@@ -1102,6 +1127,13 @@ def _apply_column_migrations(conn: sqlite3.Connection, path: str) -> None:
         for name, ddl in columns:
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+    # Safe to create after lease columns exist on upgraded DBs.
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_statement_ingest_queue_lease
+        ON statement_ingest_queue (status, next_attempt_at, priority_contest_id DESC)
+        """
+    )
     conn.commit()
     _column_migrations_done.add(path)
 
@@ -1882,16 +1914,30 @@ def claim_statement_ingest_batch(
     limit: int = 25,
     problem_ids: list[str] | None = None,
     now_iso: str | None = None,
+    leased_by: str | None = None,
+    lease_seconds: int = 600,
 ) -> list[str]:
     now = now_iso or _now()
     claimed: list[str] = []
+    lease_until = None
+    if leased_by:
+        from datetime import datetime, timedelta, timezone
+
+        try:
+            base = datetime.fromisoformat(now.replace("Z", "+00:00"))
+        except ValueError:
+            base = datetime.now(timezone.utc)
+        if base.tzinfo is None:
+            base = base.replace(tzinfo=timezone.utc)
+        lease_until = (base + timedelta(seconds=int(lease_seconds))).isoformat()
+
     with connect() as conn:
         if problem_ids:
             rows = []
             for problem_id in problem_ids:
                 row = conn.execute(
                     """
-                    SELECT problem_id, status, next_attempt_at
+                    SELECT problem_id, status, next_attempt_at, leased_until
                     FROM statement_ingest_queue
                     WHERE problem_id = ?
                     """,
@@ -1900,7 +1946,6 @@ def claim_statement_ingest_batch(
                 if row is not None:
                     rows.append(row)
                 else:
-                    # Auto-create pending row for explicit ids.
                     conn.execute(
                         """
                         INSERT OR IGNORE INTO statement_ingest_queue (
@@ -1918,7 +1963,7 @@ def claim_statement_ingest_batch(
                         ),
                     )
                     row = conn.execute(
-                        "SELECT problem_id, status, next_attempt_at FROM statement_ingest_queue WHERE problem_id = ?",
+                        "SELECT problem_id, status, next_attempt_at, leased_until FROM statement_ingest_queue WHERE problem_id = ?",
                         (problem_id,),
                     ).fetchone()
                     if row is not None:
@@ -1926,14 +1971,15 @@ def claim_statement_ingest_batch(
         else:
             rows = conn.execute(
                 """
-                SELECT problem_id, status, next_attempt_at
+                SELECT problem_id, status, next_attempt_at, leased_until
                 FROM statement_ingest_queue
                 WHERE status IN ('pending', 'retrying')
                   AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+                  AND (leased_until IS NULL OR leased_until <= ?)
                 ORDER BY priority_contest_id DESC, problem_id DESC
                 LIMIT ?
                 """,
-                (now, int(limit)),
+                (now, now, int(limit)),
             ).fetchall()
 
         for row in rows:
@@ -1941,11 +1987,13 @@ def claim_statement_ingest_batch(
                 break
             status = row["status"]
             next_at = row["next_attempt_at"]
+            leased_until_existing = row["leased_until"] if "leased_until" in row.keys() else None
             if status not in {"pending", "retrying", "failed", "partial", "asset_required"}:
-                # Allow explicit re-claim of non-terminal only when listed.
                 if problem_ids is None:
                     continue
             if next_at and next_at > now and problem_ids is None:
+                continue
+            if leased_until_existing and leased_until_existing > now and problem_ids is None:
                 continue
             conn.execute(
                 """
@@ -1953,13 +2001,238 @@ def claim_statement_ingest_batch(
                 SET status = 'processing',
                     started_at = ?,
                     updated_at = ?,
-                    attempts = attempts + 1
+                    attempts = attempts + 1,
+                    leased_until = ?,
+                    leased_by = ?
                 WHERE problem_id = ?
                 """,
-                (now, now, row["problem_id"]),
+                (now, now, lease_until, leased_by, row["problem_id"]),
             )
             claimed.append(row["problem_id"])
     return claimed
+
+
+def lease_next_statement_jobs(
+    *,
+    limit: int = 1,
+    relay_id: str,
+    lease_seconds: int = 600,
+    now_iso: str | None = None,
+) -> list[dict[str, Any]]:
+    """Atomically lease up to ``limit`` pending jobs for a relay worker."""
+    now = now_iso or _now()
+    # Expire abandoned leases back to pending/retrying.
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE statement_ingest_queue
+            SET status = CASE WHEN attempts > 0 THEN 'retrying' ELSE 'pending' END,
+                leased_until = NULL,
+                leased_by = NULL,
+                updated_at = ?
+            WHERE status = 'processing'
+              AND leased_until IS NOT NULL
+              AND leased_until <= ?
+            """,
+            (now, now),
+        )
+    claimed_ids = claim_statement_ingest_batch(
+        limit=limit,
+        leased_by=relay_id,
+        lease_seconds=lease_seconds,
+        now_iso=now,
+    )
+    jobs: list[dict[str, Any]] = []
+    with connect() as conn:
+        for problem_id in claimed_ids:
+            row = conn.execute(
+                """
+                SELECT problem_id, attempts, leased_until, priority_contest_id
+                FROM statement_ingest_queue WHERE problem_id = ?
+                """,
+                (problem_id,),
+            ).fetchone()
+            if row is None:
+                continue
+            contest_id = int(row["priority_contest_id"] or _contest_id_from_problem_id(problem_id))
+            index = problem_id[len(str(contest_id)) :]
+            jobs.append(
+                {
+                    "problem_id": problem_id,
+                    "contest_id": contest_id,
+                    "index": index,
+                    "official_url": f"https://codeforces.com/problemset/problem/{contest_id}/{index}",
+                    "attempt": int(row["attempts"] or 1),
+                    "leased_until": row["leased_until"],
+                    "leased_by": relay_id,
+                }
+            )
+    return jobs
+
+
+def record_statement_job_result(
+    problem_id: str,
+    *,
+    relay_id: str,
+    ok: bool,
+    html: str | None = None,
+    http_status: int | None = None,
+    final_url: str | None = None,
+    error: str | None = None,
+    failure_class: str | None = None,
+    content_hash: str | None = None,
+    now_iso: str | None = None,
+) -> dict[str, Any]:
+    now = now_iso or _now()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT attempts, leased_by FROM statement_ingest_queue WHERE problem_id = ?",
+            (problem_id,),
+        ).fetchone()
+        if row is None:
+            return {"accepted": False, "reason": "unknown_job"}
+        # Allow result if lease holder matches OR lease expired (recovery).
+        leased_by = row["leased_by"]
+        if leased_by and leased_by != relay_id:
+            lease = conn.execute(
+                "SELECT leased_until FROM statement_ingest_queue WHERE problem_id = ?",
+                (problem_id,),
+            ).fetchone()
+            leased_until = lease["leased_until"] if lease else None
+            if leased_until and leased_until > now:
+                return {"accepted": False, "reason": "lease_held_by_other"}
+
+        conn.execute(
+            """
+            UPDATE statement_ingest_queue
+            SET last_http_status = ?,
+                last_fetch_url = ?,
+                fetch_content_hash = ?,
+                failure_class = ?,
+                last_error = ?,
+                updated_at = ?,
+                leased_until = NULL,
+                leased_by = NULL
+            WHERE problem_id = ?
+            """,
+            (http_status, final_url, content_hash, failure_class, error, now, problem_id),
+        )
+    return {"accepted": True, "ok": ok, "attempts": int(row["attempts"] or 0)}
+
+
+def upsert_relay_heartbeat(
+    relay_id: str,
+    *,
+    version: str | None = None,
+    note: str | None = None,
+    successful_fetch: bool = False,
+    failed: bool = False,
+    blocked: bool = False,
+    now_iso: str | None = None,
+) -> None:
+    now = now_iso or _now()
+    with connect() as conn:
+        existing = conn.execute(
+            "SELECT * FROM statement_relay_heartbeats WHERE relay_id = ?",
+            (relay_id,),
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                """
+                INSERT INTO statement_relay_heartbeats (
+                    relay_id, version, last_seen_at, last_successful_fetch_at,
+                    jobs_succeeded, jobs_failed, jobs_blocked, note
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    relay_id,
+                    version,
+                    now,
+                    now if successful_fetch else None,
+                    1 if successful_fetch else 0,
+                    1 if failed else 0,
+                    1 if blocked else 0,
+                    note,
+                ),
+            )
+            return
+        conn.execute(
+            """
+            UPDATE statement_relay_heartbeats
+            SET version = COALESCE(?, version),
+                last_seen_at = ?,
+                last_successful_fetch_at = CASE WHEN ? THEN ? ELSE last_successful_fetch_at END,
+                jobs_succeeded = jobs_succeeded + ?,
+                jobs_failed = jobs_failed + ?,
+                jobs_blocked = jobs_blocked + ?,
+                note = COALESCE(?, note)
+            WHERE relay_id = ?
+            """,
+            (
+                version,
+                now,
+                1 if successful_fetch else 0,
+                now,
+                1 if successful_fetch else 0,
+                1 if failed else 0,
+                1 if blocked else 0,
+                note,
+                relay_id,
+            ),
+        )
+
+
+def statement_relay_observability(now_iso: str | None = None) -> dict[str, Any]:
+    now = now_iso or _now()
+    with connect() as conn:
+        queue = statement_ingest_queue_stats()
+        leased = conn.execute(
+            """
+            SELECT COUNT(*) AS c FROM statement_ingest_queue
+            WHERE status = 'processing' AND leased_until IS NOT NULL AND leased_until > ?
+            """,
+            (now,),
+        ).fetchone()["c"]
+        oldest = conn.execute(
+            """
+            SELECT problem_id, discovered_at FROM statement_ingest_queue
+            WHERE status IN ('pending', 'retrying')
+            ORDER BY discovered_at ASC LIMIT 1
+            """
+        ).fetchone()
+        heartbeats = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT * FROM statement_relay_heartbeats ORDER BY last_seen_at DESC"
+            ).fetchall()
+        ]
+    relay_status = "offline"
+    last_heartbeat = heartbeats[0] if heartbeats else None
+    if last_heartbeat:
+        from datetime import datetime, timezone
+
+        try:
+            seen = datetime.fromisoformat(str(last_heartbeat["last_seen_at"]).replace("Z", "+00:00"))
+            if seen.tzinfo is None:
+                seen = seen.replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - seen).total_seconds()
+            if age <= 180:
+                relay_status = "healthy"
+            elif age <= 900:
+                relay_status = "degraded"
+            else:
+                relay_status = "offline"
+        except ValueError:
+            relay_status = "degraded"
+    return {
+        "pending_jobs": int(queue.get("pending", 0)) + int(queue.get("retrying", 0)),
+        "leased_jobs": int(leased),
+        "queue": queue,
+        "oldest_pending_job": dict(oldest) if oldest else None,
+        "last_relay_heartbeat": last_heartbeat,
+        "relays": heartbeats,
+        "relay_status": relay_status,
+    }
 
 
 def finish_statement_ingest(

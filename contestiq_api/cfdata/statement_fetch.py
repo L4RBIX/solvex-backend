@@ -75,17 +75,33 @@ def _curl_cffi_transport(url: str, timeout: float) -> HtmlFetchResult:
             "curl_cffi is required to fetch Codeforces HTML (Cloudflare)."
         ) from exc
 
-    response = cf_requests.get(
-        url,
-        impersonate="chrome131",
-        timeout=timeout,
-        headers={"User-Agent": DEFAULT_USER_AGENT, "Accept-Language": "en-US,en;q=0.9"},
-    )
-    return HtmlFetchResult(
-        status_code=int(response.status_code),
-        text=response.text or "",
-        url=str(getattr(response, "url", url) or url),
-    )
+    # Prefer chrome116: Railway/datacenter egress is often 403 with newer
+    # Chrome impersonation profiles, while chrome116 still returns real pages.
+    impersonations = ("chrome116", "chrome110", "chrome99", "safari17_0", "chrome131")
+    last: HtmlFetchResult | None = None
+    for impersonate in impersonations:
+        response = cf_requests.get(
+            url,
+            impersonate=impersonate,
+            timeout=timeout,
+            headers={
+                "User-Agent": DEFAULT_USER_AGENT,
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+        )
+        text = response.text or ""
+        last = HtmlFetchResult(
+            status_code=int(response.status_code),
+            text=text,
+            url=str(getattr(response, "url", url) or url),
+        )
+        if last.status_code == 200 and "problem-statement" in text:
+            return last
+        if last.status_code == 200 and text.strip() and "Just a moment" not in text:
+            return last
+    assert last is not None
+    return last
 
 
 def fetch_problem_html(
