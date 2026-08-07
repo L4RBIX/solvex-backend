@@ -132,7 +132,21 @@ def test_duplicate_ingest_is_idempotent():
     assert count == 1
 
 
-def test_batch_processes_queue_with_injected_transport():
+def test_batch_processes_queue_with_injected_transport(monkeypatch):
+    monkeypatch.setenv("STATEMENT_INGEST_DIRECT_FETCH", "1")
+    from contestiq_api.settings import get_settings
+
+    get_settings.cache_clear() if hasattr(get_settings, "cache_clear") else None
+    # settings is not lru_cached; monkeypatch module attribute instead
+    monkeypatch.setattr(
+        "contestiq_api.cfdata.statement_ingest.get_settings",
+        lambda: type("S", (), {
+            "statement_ingest_direct_fetch": True,
+            "statement_ingest_batch_size": 25,
+            "statement_ingest_max_attempts": 8,
+            "codeforces_max_retries": 1,
+        })(),
+    )
     _seed_catalog("2254A", "Riptide")
     _seed_catalog("1A", "Theatre Square")
     html_map = {"2254A": _html("2254A.html"), "1A": _html("1A.html")}
@@ -153,7 +167,16 @@ def test_batch_processes_queue_with_injected_transport():
     assert is_arena_solvable("1A") is True
 
 
-def test_retry_backoff_on_fetch_failure():
+def test_retry_backoff_on_fetch_failure(monkeypatch):
+    monkeypatch.setattr(
+        "contestiq_api.cfdata.statement_ingest.get_settings",
+        lambda: type("S", (), {
+            "statement_ingest_direct_fetch": True,
+            "statement_ingest_batch_size": 25,
+            "statement_ingest_max_attempts": 8,
+            "codeforces_max_retries": 1,
+        })(),
+    )
     _seed_catalog("2254A", "Riptide")
 
     def transport(url: str, timeout: float) -> HtmlFetchResult:

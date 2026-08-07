@@ -139,11 +139,15 @@ async def _periodic_codeforces_catalog_sync() -> None:
 
 
 async def _periodic_statement_ingest() -> None:
-    """Drain missing/pending statements via official CF HTML ingestion.
+    """Keep the statement ingest queue primed for the external HTML relay.
 
-    Interval is STATEMENT_INGEST_INTERVAL_HOURS (default 1). Set to 0 to disable.
-    Catalog sync enqueues new IDs; this worker fetches/validates/stores content
-    without blocking catalog parity.
+    Direct Codeforces fetches from Railway are usually Cloudflare-blocked, so
+    this loop:
+    1. enqueues missing/non-display-ready IDs (newest first)
+    2. optionally drains via direct fetch when STATEMENT_INGEST_DIRECT_FETCH=1
+
+    The GitHub Actions workflow (ingest-statements.yml) fetches official pages
+    elsewhere and POSTs HTML to /api/v1/admin/statements/ingest-html.
     """
     interval_hours = float(settings.statement_ingest_interval_hours or 0.0)
     if interval_hours <= 0:
@@ -152,26 +156,37 @@ async def _periodic_statement_ingest() -> None:
 
     from contestiq_api.cfdata import statement_ingest
 
-    # Run after catalog sync stagger so new stubs exist first.
     await asyncio.sleep(min(180.0, max(30.0, interval_hours * 3600 * 0.05)))
-    # On boot, ensure the historical missing backlog is queued (newest first).
-    try:
-        queued = await asyncio.to_thread(
-            statement_ingest.enqueue_statement_ingestion,
-            None,
-            reason="startup_backfill",
-            only_missing=True,
-        )
-        logger.info(json.dumps({"event": "statement_ingest_enqueue", **queued}, default=str))
-    except Exception:
-        logger.exception("statement_ingest startup enqueue failed")
-
     while True:
         try:
-            report = await asyncio.to_thread(statement_ingest.process_statement_ingest_batch)
-            logger.info(
-                json.dumps({"event": "periodic_statement_ingest", **report}, default=str)
+            queued = await asyncio.to_thread(
+                statement_ingest.enqueue_statement_ingestion,
+                None,
+                reason="periodic_enqueue",
+                only_missing=True,
             )
+            logger.info(json.dumps({"event": "statement_ingest_enqueue", **queued}, default=str))
+            if settings.statement_ingest_direct_fetch:
+                report = await asyncio.to_thread(statement_ingest.process_statement_ingest_batch)
+                logger.info(
+                    json.dumps({"event": "periodic_statement_ingest", **report}, default=str)
+                )
+            else:
+                from contestiq_api.cfdata import store as cf_store
+
+                logger.info(
+                    json.dumps(
+                        {
+                            "event": "periodic_statement_ingest_waiting_for_relay",
+                            "enqueued": queued,
+                            "queue": cf_store.statement_ingest_queue_stats(),
+                            "display_ready": cf_store.arena_catalog_coverage_stats().get(
+                                "display_ready"
+                            ),
+                        },
+                        default=str,
+                    )
+                )
         except Exception:
             logger.exception("periodic_statement_ingest failed")
         await asyncio.sleep(max(60.0, interval_hours * 3600))

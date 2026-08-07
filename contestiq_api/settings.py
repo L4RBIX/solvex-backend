@@ -159,6 +159,9 @@ class Settings:
     statement_ingest_batch_size: int = 25
     statement_ingest_max_attempts: int = 8
     statement_ingest_rate_limit_seconds: float = 3.0
+    # Railway/datacenter IPs are usually Cloudflare-blocked. Keep False in
+    # production and let GitHub Actions (or another relay) POST HTML.
+    statement_ingest_direct_fetch: bool = False
     # Billing (Phase 06): default provider name for checkout
     billing_provider: str = "manual"
     billing_api_key: str = ""
@@ -252,6 +255,9 @@ def get_settings() -> Settings:
         statement_ingest_max_attempts=_parse_int(os.getenv("STATEMENT_INGEST_MAX_ATTEMPTS"), 8),
         statement_ingest_rate_limit_seconds=_parse_float(
             os.getenv("STATEMENT_INGEST_RATE_LIMIT_SECONDS"), 3.0
+        ),
+        statement_ingest_direct_fetch=_parse_bool(
+            os.getenv("STATEMENT_INGEST_DIRECT_FETCH"), False
         ),
         billing_provider=os.getenv("BILLING_PROVIDER") or "manual",
         billing_api_key=os.getenv("BILLING_API_KEY") or "",
