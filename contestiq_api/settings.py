@@ -154,6 +154,11 @@ class Settings:
     codeforces_problemset_ttl_hours: int = 6
     # Background catalog parity sync interval (hours). 0 disables the loop.
     codeforces_catalog_sync_interval_hours: float = 6.0
+    # Automatic statement HTML ingestion (hours between worker cycles). 0 disables.
+    statement_ingest_interval_hours: float = 1.0
+    statement_ingest_batch_size: int = 25
+    statement_ingest_max_attempts: int = 8
+    statement_ingest_rate_limit_seconds: float = 3.0
     # Billing (Phase 06): default provider name for checkout
     billing_provider: str = "manual"
     billing_api_key: str = ""
@@ -239,6 +244,14 @@ def get_settings() -> Settings:
         codeforces_problemset_ttl_hours=_parse_int(os.getenv("CODEFORCES_PROBLEMSET_TTL_HOURS"), 6),
         codeforces_catalog_sync_interval_hours=_parse_float(
             os.getenv("CODEFORCES_CATALOG_SYNC_INTERVAL_HOURS"), 6.0
+        ),
+        statement_ingest_interval_hours=_parse_float(
+            os.getenv("STATEMENT_INGEST_INTERVAL_HOURS"), 1.0
+        ),
+        statement_ingest_batch_size=_parse_int(os.getenv("STATEMENT_INGEST_BATCH_SIZE"), 25),
+        statement_ingest_max_attempts=_parse_int(os.getenv("STATEMENT_INGEST_MAX_ATTEMPTS"), 8),
+        statement_ingest_rate_limit_seconds=_parse_float(
+            os.getenv("STATEMENT_INGEST_RATE_LIMIT_SECONDS"), 3.0
         ),
         billing_provider=os.getenv("BILLING_PROVIDER") or "manual",
         billing_api_key=os.getenv("BILLING_API_KEY") or "",

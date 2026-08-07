@@ -1034,6 +1034,23 @@ CREATE TABLE IF NOT EXISTS problem_import_quarantine (
     quarantined_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_problem_import_quarantine_batch ON problem_import_quarantine (batch_id, quarantined_at DESC);
+
+-- Runtime queue for automatic CF HTML statement ingestion (026).
+CREATE TABLE IF NOT EXISTS statement_ingest_queue (
+    problem_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    priority_contest_id INTEGER NOT NULL DEFAULT 0,
+    reason TEXT,
+    last_error TEXT,
+    next_attempt_at TEXT,
+    discovered_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_statement_ingest_queue_status_next
+    ON statement_ingest_queue (status, next_attempt_at, priority_contest_id DESC);
 """
 
 
@@ -1425,6 +1442,15 @@ def save_problemset_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
             )
 
     stub_count = ensure_statement_pending_stubs(new_problem_ids)
+    try:
+        from contestiq_api.cfdata import statement_ingest
+
+        if new_problem_ids:
+            statement_ingest.enqueue_statement_ingestion(
+                list(new_problem_ids), reason="catalog_sync"
+            )
+    except Exception:
+        pass
     return {
         "problems": len(problems),
         "statistics": len(stats),
@@ -1760,6 +1786,271 @@ def arena_catalog_coverage_stats() -> dict[str, Any]:
         "availability_status_counts": by_status,
         "sample_missing_ids": sample_missing,
         "probe_2228B": dict(probe_2228b) if probe_2228b else None,
+    }
+
+
+# ─── Statement ingest queue ───────────────────────────────────────────────────
+
+
+def _contest_id_from_problem_id(problem_id: str) -> int:
+    digits = []
+    for ch in problem_id:
+        if ch.isdigit():
+            digits.append(ch)
+        else:
+            break
+    try:
+        return int("".join(digits)) if digits else 0
+    except ValueError:
+        return 0
+
+
+def list_non_display_ready_problem_ids() -> list[str]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT problem_id
+            FROM problem_statements
+            WHERE display_ready = 0
+               OR statement IS NULL
+               OR TRIM(statement) = ''
+               OR availability_status IN ('missing', 'partial')
+            """
+        ).fetchall()
+    return [row["problem_id"] for row in rows]
+
+
+def enqueue_statement_ingest(problem_ids: list[str], *, reason: str = "manual") -> int:
+    """Insert or re-queue problem IDs. Does not reset terminal succeeded rows unless missing again."""
+    if not problem_ids:
+        return 0
+    now = _now()
+    touched = 0
+    with connect() as conn:
+        for problem_id in problem_ids:
+            if not problem_id:
+                continue
+            priority = _contest_id_from_problem_id(problem_id)
+            existing = conn.execute(
+                "SELECT status FROM statement_ingest_queue WHERE problem_id = ?",
+                (problem_id,),
+            ).fetchone()
+            if existing is None:
+                conn.execute(
+                    """
+                    INSERT INTO statement_ingest_queue (
+                        problem_id, status, attempts, priority_contest_id, reason,
+                        last_error, next_attempt_at, discovered_at, started_at,
+                        completed_at, updated_at
+                    ) VALUES (?, 'pending', 0, ?, ?, NULL, ?, ?, NULL, NULL, ?)
+                    """,
+                    (problem_id, priority, reason, now, now, now),
+                )
+                touched += 1
+                continue
+            status = existing["status"]
+            if status in {"pending", "processing", "retrying"}:
+                continue
+            # Re-queue failed / partial / asset_required for another pass when asked.
+            if status in {"failed", "partial", "asset_required", "succeeded"}:
+                # Only re-queue succeeded if statement is still not display-ready.
+                if status == "succeeded":
+                    stmt = conn.execute(
+                        "SELECT display_ready, statement FROM problem_statements WHERE problem_id = ?",
+                        (problem_id,),
+                    ).fetchone()
+                    if stmt is not None and bool(stmt["display_ready"]) and (stmt["statement"] or "").strip():
+                        continue
+                conn.execute(
+                    """
+                    UPDATE statement_ingest_queue
+                    SET status = 'pending',
+                        reason = ?,
+                        last_error = NULL,
+                        next_attempt_at = ?,
+                        completed_at = NULL,
+                        updated_at = ?
+                    WHERE problem_id = ?
+                    """,
+                    (reason, now, now, problem_id),
+                )
+                touched += 1
+    return touched
+
+
+def claim_statement_ingest_batch(
+    *,
+    limit: int = 25,
+    problem_ids: list[str] | None = None,
+    now_iso: str | None = None,
+) -> list[str]:
+    now = now_iso or _now()
+    claimed: list[str] = []
+    with connect() as conn:
+        if problem_ids:
+            rows = []
+            for problem_id in problem_ids:
+                row = conn.execute(
+                    """
+                    SELECT problem_id, status, next_attempt_at
+                    FROM statement_ingest_queue
+                    WHERE problem_id = ?
+                    """,
+                    (problem_id,),
+                ).fetchone()
+                if row is not None:
+                    rows.append(row)
+                else:
+                    # Auto-create pending row for explicit ids.
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO statement_ingest_queue (
+                            problem_id, status, attempts, priority_contest_id, reason,
+                            last_error, next_attempt_at, discovered_at, started_at,
+                            completed_at, updated_at
+                        ) VALUES (?, 'pending', 0, ?, 'explicit', NULL, ?, ?, NULL, NULL, ?)
+                        """,
+                        (
+                            problem_id,
+                            _contest_id_from_problem_id(problem_id),
+                            now,
+                            now,
+                            now,
+                        ),
+                    )
+                    row = conn.execute(
+                        "SELECT problem_id, status, next_attempt_at FROM statement_ingest_queue WHERE problem_id = ?",
+                        (problem_id,),
+                    ).fetchone()
+                    if row is not None:
+                        rows.append(row)
+        else:
+            rows = conn.execute(
+                """
+                SELECT problem_id, status, next_attempt_at
+                FROM statement_ingest_queue
+                WHERE status IN ('pending', 'retrying')
+                  AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+                ORDER BY priority_contest_id DESC, problem_id DESC
+                LIMIT ?
+                """,
+                (now, int(limit)),
+            ).fetchall()
+
+        for row in rows:
+            if len(claimed) >= int(limit):
+                break
+            status = row["status"]
+            next_at = row["next_attempt_at"]
+            if status not in {"pending", "retrying", "failed", "partial", "asset_required"}:
+                # Allow explicit re-claim of non-terminal only when listed.
+                if problem_ids is None:
+                    continue
+            if next_at and next_at > now and problem_ids is None:
+                continue
+            conn.execute(
+                """
+                UPDATE statement_ingest_queue
+                SET status = 'processing',
+                    started_at = ?,
+                    updated_at = ?,
+                    attempts = attempts + 1
+                WHERE problem_id = ?
+                """,
+                (now, now, row["problem_id"]),
+            )
+            claimed.append(row["problem_id"])
+    return claimed
+
+
+def finish_statement_ingest(
+    problem_id: str,
+    *,
+    status: str,
+    detail: str | None = None,
+    now_iso: str | None = None,
+) -> None:
+    now = now_iso or _now()
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE statement_ingest_queue
+            SET status = ?,
+                last_error = ?,
+                completed_at = ?,
+                updated_at = ?,
+                next_attempt_at = NULL
+            WHERE problem_id = ?
+            """,
+            (status, detail, now, now, problem_id),
+        )
+
+
+def get_statement_ingest_attempts(problem_id: str) -> int:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT attempts FROM statement_ingest_queue WHERE problem_id = ?",
+            (problem_id,),
+        ).fetchone()
+    return int(row["attempts"]) if row else 0
+
+
+def bump_statement_ingest_failure(
+    problem_id: str,
+    *,
+    error: str,
+    next_attempt_at: str,
+    now_iso: str | None = None,
+) -> int:
+    now = now_iso or _now()
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE statement_ingest_queue
+            SET status = 'retrying',
+                last_error = ?,
+                next_attempt_at = ?,
+                updated_at = ?
+            WHERE problem_id = ?
+            """,
+            (error, next_attempt_at, now, problem_id),
+        )
+        row = conn.execute(
+            "SELECT attempts FROM statement_ingest_queue WHERE problem_id = ?",
+            (problem_id,),
+        ).fetchone()
+    return int(row["attempts"]) if row else 0
+
+
+def statement_ingest_queue_stats() -> dict[str, Any]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT status, COUNT(*) AS c
+            FROM statement_ingest_queue
+            GROUP BY status
+            """
+        ).fetchall()
+        pending_ready = conn.execute(
+            """
+            SELECT COUNT(*) AS c
+            FROM statement_ingest_queue
+            WHERE status IN ('pending', 'retrying')
+              AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+            """,
+            (_now(),),
+        ).fetchone()["c"]
+    by_status = {row["status"]: int(row["c"]) for row in rows}
+    return {
+        "by_status": by_status,
+        "pending": int(by_status.get("pending", 0)),
+        "processing": int(by_status.get("processing", 0)),
+        "succeeded": int(by_status.get("succeeded", 0)),
+        "partial": int(by_status.get("partial", 0)),
+        "asset_required": int(by_status.get("asset_required", 0)),
+        "failed": int(by_status.get("failed", 0)),
+        "retrying": int(by_status.get("retrying", 0)),
+        "due_now": int(pending_ready),
     }
 
 
