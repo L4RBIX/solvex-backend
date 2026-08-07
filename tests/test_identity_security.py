@@ -121,8 +121,62 @@ def test_invalid_bearer_token_is_rejected(client):
 def test_handle_claim_routes_require_authentication(client):
     assert client.post("/api/v1/handles/claim", json={"handle": "auth-required"}).status_code == 401
     assert client.post("/api/v1/handles/claim/missing/verify").status_code == 401
+    assert client.get("/api/v1/handles/claim/active").status_code == 401
     assert client.get("/api/v1/handles/me").status_code == 401
 
+
+def test_active_claim_restores_same_code_and_blocks_cross_user_reads(client):
+    owner = register(client)
+    stranger = register(client)
+    created = client.post(
+        "/api/v1/handles/claim", json={"handle": "active-restore-handle"}, headers=bearer(owner)
+    ).json()
+    assert created["verification_code"].startswith("solvex-verify-")
+
+    restored = client.get("/api/v1/handles/claim/active", headers=bearer(owner)).json()
+    assert restored["active"] is True
+    assert restored["claim_id"] == created["claim_id"]
+    assert restored["verification_code"] == created["verification_code"]
+    assert restored["handle"] == "active-restore-handle"
+    assert restored["status"] == handles.STATUS_PENDING
+    assert restored["expires_at"] == created["expires_at"]
+
+    # History listing still omits the code.
+    history = client.get("/api/v1/handles/me", headers=bearer(owner)).json()
+    assert "verification_code" not in json.dumps(history)
+
+    stranger_view = client.get("/api/v1/handles/claim/active", headers=bearer(stranger)).json()
+    assert stranger_view == {"active": False}
+    assert created["verification_code"] not in json.dumps(stranger_view)
+
+
+def test_active_claim_returns_false_when_expired_and_only_one_pending(client):
+    user = register(client)
+    first = client.post(
+        "/api/v1/handles/claim", json={"handle": "first-active-handle"}, headers=bearer(user)
+    ).json()
+    second = client.post(
+        "/api/v1/handles/claim", json={"handle": "second-active-handle"}, headers=bearer(user)
+    ).json()
+    assert second["claim_id"] != first["claim_id"]
+
+    active = client.get("/api/v1/handles/claim/active", headers=bearer(user)).json()
+    assert active["active"] is True
+    assert active["claim_id"] == second["claim_id"]
+    assert active["verification_code"] == second["verification_code"]
+
+    with store.connect() as conn:
+        old = conn.execute(
+            "SELECT status FROM handle_claims WHERE claim_id = ?", (first["claim_id"],)
+        ).fetchone()
+        assert old["status"] == handles.STATUS_SUPERSEDED
+        conn.execute(
+            "UPDATE handle_claims SET expires_at = ? WHERE claim_id = ?",
+            ((handles._now_dt() - dt.timedelta(minutes=1)).isoformat(), second["claim_id"]),
+        )
+
+    expired = client.get("/api/v1/handles/claim/active", headers=bearer(user)).json()
+    assert expired == {"active": False}
 
 # ─── 1. Unauthenticated user cannot create/join/start/submit duel ───────────
 

@@ -63,6 +63,20 @@ def claim_handle(
     return handles.start_claim(user["user_id"], payload.handle)
 
 
+@router.get("/handles/claim/active")
+def active_handle_claim(user: dict[str, Any] = Depends(auth.require_user)):
+    """Restore the caller's current unexpired pending verification claim.
+
+    Used by the frontend after remount / tab return / reload so the same
+    solvex-verify-* code remains visible until it expires. Does not create a
+    new claim.
+    """
+    claim = handles.get_active_claim(user["user_id"])
+    if claim is None:
+        return {"active": False}
+    return handles.active_claim_response(claim)
+
+
 @router.post("/handles/claim/{claim_id}/verify")
 def verify_handle_claim(
     claim_id: str,
