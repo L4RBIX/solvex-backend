@@ -210,12 +210,31 @@ class StatementIngestRequest(BaseModel):
     enqueue_only: bool = False
 
 
+class StatementHtmlUpsertItem(BaseModel):
+    problem_id: str
+    html: str = Field(..., min_length=40, max_length=2_000_000)
+
+
+class StatementHtmlUpsertRequest(BaseModel):
+    items: list[StatementHtmlUpsertItem] = Field(..., min_length=1, max_length=50)
+    force: bool = False
+
+
 @router.get("/statements/ingest/stats")
 def statement_ingest_stats(admin: dict[str, Any] = Depends(auth.require_admin)):
     auth.audit(admin["actor"], "statement_ingest_stats", None, {})
+    missing = store.list_non_display_ready_problem_ids()
+    # Newest first for external fetch workers.
+    missing_sorted = sorted(
+        missing,
+        key=lambda pid: store._contest_id_from_problem_id(pid),
+        reverse=True,
+    )
     return {
         "queue": store.statement_ingest_queue_stats(),
         "coverage": store.arena_catalog_coverage_stats(),
+        "missing_newest": missing_sorted[:100],
+        "missing_total": len(missing_sorted),
     }
 
 
@@ -257,6 +276,65 @@ def run_statement_ingest(
         min_contest_id=payload.min_contest_id,
         force=payload.force,
     )
+
+
+@router.post("/statements/ingest-html")
+def upsert_statements_from_html(
+    payload: StatementHtmlUpsertRequest,
+    admin: dict[str, Any] = Depends(auth.require_admin),
+):
+    """Validate+store pre-fetched official CF HTML (for Cloudflare-blocked hosts).
+
+    Railway datacenter IPs are often blocked by Codeforces/Cloudflare. External
+    workers (GitHub Actions, ops hosts) fetch the public pages and POST HTML here.
+    Storage still goes through the trusted classifier/upsert path.
+    """
+    from contestiq_api.cfdata import statement_ingest
+
+    auth.audit(
+        admin["actor"],
+        "statement_ingest_html",
+        None,
+        {"count": len(payload.items), "force": payload.force},
+    )
+    results = []
+    succeeded = partial = asset_required = failed = 0
+    for item in payload.items:
+        try:
+            store.enqueue_statement_ingest([item.problem_id], reason="html_upsert")
+            store.claim_statement_ingest_batch(limit=1, problem_ids=[item.problem_id])
+            outcome = statement_ingest.ingest_one(
+                item.problem_id, html=item.html, force=payload.force
+            )
+            status = outcome.get("status") or "failed"
+            if status == "succeeded":
+                succeeded += 1
+            elif status == "partial":
+                partial += 1
+            elif status == "asset_required":
+                asset_required += 1
+            else:
+                failed += 1
+            store.finish_statement_ingest(
+                item.problem_id,
+                status=status if status != "skipped" else "succeeded",
+                detail=outcome.get("reason"),
+            )
+            results.append(outcome)
+        except Exception as exc:
+            failed += 1
+            store.finish_statement_ingest(
+                item.problem_id, status="failed", detail=str(exc)[:500]
+            )
+            results.append({"problem_id": item.problem_id, "status": "failed", "error": str(exc)[:500]})
+    return {
+        "succeeded": succeeded,
+        "partial": partial,
+        "asset_required": asset_required,
+        "failed": failed,
+        "results": results,
+        "coverage": store.arena_catalog_coverage_stats(),
+    }
 
 
 # ─── Analysis snapshots ──────────────────────────────────────────────────────

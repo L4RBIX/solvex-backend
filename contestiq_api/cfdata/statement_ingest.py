@@ -129,6 +129,12 @@ def ingest_one(
 
     fetch_meta: dict[str, Any] = {}
     if html is None:
+        if transport is None and not get_settings().statement_ingest_direct_fetch:
+            raise statement_fetch.StatementFetchError(
+                "direct Codeforces HTML fetch is disabled on this host "
+                "(Cloudflare blocks most datacenter IPs). Use the HTML upsert "
+                "relay / GitHub Actions worker."
+            )
         result = statement_fetch.fetch_problem_html(
             contest_id, index, transport=transport
         )
