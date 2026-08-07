@@ -815,3 +815,89 @@ def import_problem_database(
         error=error_message,
         quarantine_reasons=quarantine_reasons,
     )
+
+
+def apply_statement_content(
+    problem_id: str,
+    catalog_row: dict[str, Any],
+    content: dict[str, Any] | None,
+    *,
+    batch_id: str,
+    source_name: str = "codeforces-official-page",
+    force: bool = False,
+) -> dict[str, Any]:
+    """Classify + upsert one statement through the same trusted import path.
+
+    Used by automatic HTML ingestion so live fetches reuse `_classify` /
+    `_upsert_statement` instead of inventing a second statement store.
+
+    Overwrite policy (unless ``force``):
+    - always allow replacing ``missing`` / pending-* stubs / empty statements
+    - allow replacing ``partial`` rows
+    - skip already display-ready rows from other trusted sources
+    """
+    reason = _validate_content_entry(content)
+    if reason is not None:
+        raise ValueError(f"invalid content for {problem_id}: {reason}")
+
+    payload = _classify(catalog_row, content)
+    # Prefer an explicit ingest source tag when the content omitted it.
+    if content and not payload.get("source_dataset"):
+        payload["source_dataset"] = content.get("source") or source_name
+    content_hash = _content_hash(payload)
+
+    with store.connect() as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO problem_import_batches
+                (batch_id, source_name, source_sha256, status, started_at)
+            VALUES (?, ?, 'n/a', 'completed', ?)
+            """,
+            (batch_id, source_name, _now()),
+        )
+        existing = conn.execute(
+            """
+            SELECT content_hash, availability_status, display_ready, source_dataset, statement
+            FROM problem_statements WHERE problem_id = ?
+            """,
+            (problem_id,),
+        ).fetchone()
+        if existing is not None and not force:
+            existing_hash = existing["content_hash"]
+            if existing_hash == content_hash:
+                return {
+                    "action": "skipped",
+                    "reason": "unchanged",
+                    "payload": payload,
+                    "content_hash": content_hash,
+                }
+            is_pending = str(existing_hash or "").startswith("pending-")
+            is_missing = existing["availability_status"] == "missing" or not (
+                existing["statement"] or ""
+            ).strip()
+            is_partial = existing["availability_status"] == "partial"
+            already_ready = bool(existing["display_ready"])
+            if already_ready and not is_pending and not is_missing and not is_partial:
+                other_source = existing["source_dataset"]
+                if other_source and other_source != (payload.get("source_dataset") or source_name):
+                    return {
+                        "action": "skipped",
+                        "reason": "display_ready_other_source",
+                        "payload": {
+                            "availability_status": existing["availability_status"],
+                            "display_ready": True,
+                            "solve_ready": False,
+                        },
+                        "content_hash": existing_hash,
+                    }
+
+        action = "imported" if existing is None else "updated"
+        _upsert_statement(conn, problem_id, batch_id, content_hash, payload)
+        conn.commit()
+
+    return {
+        "action": action,
+        "reason": None,
+        "payload": payload,
+        "content_hash": content_hash,
+    }

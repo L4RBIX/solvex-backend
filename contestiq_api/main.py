@@ -138,11 +138,51 @@ async def _periodic_codeforces_catalog_sync() -> None:
         await asyncio.sleep(max(60.0, interval_hours * 3600))
 
 
+async def _periodic_statement_ingest() -> None:
+    """Drain missing/pending statements via official CF HTML ingestion.
+
+    Interval is STATEMENT_INGEST_INTERVAL_HOURS (default 1). Set to 0 to disable.
+    Catalog sync enqueues new IDs; this worker fetches/validates/stores content
+    without blocking catalog parity.
+    """
+    interval_hours = float(settings.statement_ingest_interval_hours or 0.0)
+    if interval_hours <= 0:
+        logger.info("periodic_statement_ingest disabled (interval_hours<=0)")
+        return
+
+    from contestiq_api.cfdata import statement_ingest
+
+    # Run after catalog sync stagger so new stubs exist first.
+    await asyncio.sleep(min(180.0, max(30.0, interval_hours * 3600 * 0.05)))
+    # On boot, ensure the historical missing backlog is queued (newest first).
+    try:
+        queued = await asyncio.to_thread(
+            statement_ingest.enqueue_statement_ingestion,
+            None,
+            reason="startup_backfill",
+            only_missing=True,
+        )
+        logger.info(json.dumps({"event": "statement_ingest_enqueue", **queued}, default=str))
+    except Exception:
+        logger.exception("statement_ingest startup enqueue failed")
+
+    while True:
+        try:
+            report = await asyncio.to_thread(statement_ingest.process_statement_ingest_batch)
+            logger.info(
+                json.dumps({"event": "periodic_statement_ingest", **report}, default=str)
+            )
+        except Exception:
+            logger.exception("periodic_statement_ingest failed")
+        await asyncio.sleep(max(60.0, interval_hours * 3600))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     diag = _log_storage_diagnostics()
     asyncio.create_task(_maybe_auto_seed_catalog(diag))
     asyncio.create_task(_periodic_codeforces_catalog_sync())
+    asyncio.create_task(_periodic_statement_ingest())
     yield
 
 

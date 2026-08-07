@@ -1,0 +1,43 @@
+name: Ingest Codeforces statements
+
+# Redundant trigger for the in-process statement ingest worker on Railway.
+on:
+  schedule:
+    - cron: "20 * * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max problems to ingest this run"
+        required: false
+        default: "40"
+      min_contest_id:
+        description: "Optional minimum contest id filter"
+        required: false
+        default: "2248"
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger statement ingest
+        env:
+          SOLVEX_API_BASE: ${{ vars.SOLVEX_API_BASE || 'https://web-production-3ea15.up.railway.app' }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          LIMIT: ${{ github.event.inputs.limit || '40' }}
+          MIN_CONTEST_ID: ${{ github.event.inputs.min_contest_id || '' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ADMIN_API_KEY}" ]; then
+            echo "ADMIN_API_KEY secret is required" >&2
+            exit 1
+          fi
+          body='{"limit": '"$LIMIT"'}'
+          if [ -n "${MIN_CONTEST_ID}" ]; then
+            body='{"limit": '"$LIMIT"', "min_contest_id": '"$MIN_CONTEST_ID"'}'
+          fi
+          echo "POST $SOLVEX_API_BASE/api/v1/admin/statements/ingest"
+          resp=$(curl -sS -X POST "$SOLVEX_API_BASE/api/v1/admin/statements/ingest" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Key: $ADMIN_API_KEY" \
+            -d "$body")
+          echo "$resp" | python3 -m json.tool

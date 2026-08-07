@@ -202,6 +202,63 @@ def force_resync(handle: str, admin: dict[str, Any] = Depends(auth.require_admin
     return {"job": job}
 
 
+class StatementIngestRequest(BaseModel):
+    problem_ids: list[str] | None = None
+    limit: int | None = 25
+    min_contest_id: int | None = None
+    force: bool = False
+    enqueue_only: bool = False
+
+
+@router.get("/statements/ingest/stats")
+def statement_ingest_stats(admin: dict[str, Any] = Depends(auth.require_admin)):
+    auth.audit(admin["actor"], "statement_ingest_stats", None, {})
+    return {
+        "queue": store.statement_ingest_queue_stats(),
+        "coverage": store.arena_catalog_coverage_stats(),
+    }
+
+
+@router.post("/statements/ingest")
+def run_statement_ingest(
+    payload: StatementIngestRequest,
+    admin: dict[str, Any] = Depends(auth.require_admin),
+):
+    """Enqueue and/or process automatic CF HTML statement ingestion."""
+    from contestiq_api.cfdata import statement_ingest
+
+    auth.audit(
+        admin["actor"],
+        "statement_ingest",
+        None,
+        {
+            "limit": payload.limit,
+            "min_contest_id": payload.min_contest_id,
+            "force": payload.force,
+            "enqueue_only": payload.enqueue_only,
+            "problem_ids": (payload.problem_ids or [])[:20],
+        },
+    )
+    if payload.enqueue_only:
+        return statement_ingest.enqueue_statement_ingestion(
+            payload.problem_ids,
+            reason="admin",
+            only_missing=payload.problem_ids is None,
+        )
+    if payload.problem_ids:
+        statement_ingest.enqueue_statement_ingestion(payload.problem_ids, reason="admin")
+        return statement_ingest.process_statement_ingest_batch(
+            limit=payload.limit or len(payload.problem_ids),
+            problem_ids=payload.problem_ids,
+            force=payload.force,
+        )
+    return statement_ingest.backfill_missing_statements(
+        limit=payload.limit,
+        min_contest_id=payload.min_contest_id,
+        force=payload.force,
+    )
+
+
 # ─── Analysis snapshots ──────────────────────────────────────────────────────
 
 
