@@ -84,6 +84,8 @@ class PublicProblemResponse(BaseModel):
     authored_content: PublicAuthoredContent | None
     statement_content: PublicStatementContent | None = None
     arena_capable: bool = False
+    submit_capable: bool = False
+    submit_unavailable_reason: str | None = None
 
 
 def normalize_problem_id(raw_problem_id: str) -> str:
@@ -263,6 +265,19 @@ def _problem_response(raw_problem_id: str) -> PublicProblemResponse:
     statement_row = store.get_problem_statement(problem_id)
     statement_content = _statement_content(statement_row)
     from contestiq_api.arena_eligibility import is_arena_solvable
+    from contestiq_api.practice_packs.pipeline import problem_has_active_pack
+
+    arena_capable = is_arena_solvable(problem_id)
+    submit_capable = problem_has_active_pack(problem_id)
+    submit_reason = None
+    if not submit_capable:
+        sc = statement_content
+        if sc and sc.is_interactive:
+            submit_reason = "Interactive problems are not supported by SolveX practice Submit."
+        elif sc and sc.io_mode == "file":
+            submit_reason = "File I/O problems are not supported by SolveX practice Submit."
+        else:
+            submit_reason = "Practice judging not available yet for this problem."
 
     return PublicProblemResponse(
         problem_id=problem_id,
@@ -275,7 +290,9 @@ def _problem_response(raw_problem_id: str) -> PublicProblemResponse:
         content_available=authored_content is not None,
         authored_content=authored_content,
         statement_content=statement_content,
-        arena_capable=is_arena_solvable(problem_id),
+        arena_capable=arena_capable,
+        submit_capable=submit_capable,
+        submit_unavailable_reason=submit_reason,
     )
 
 

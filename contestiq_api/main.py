@@ -326,6 +326,19 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_periodic_codeforces_catalog_sync())
     asyncio.create_task(_periodic_statement_ingest())
     asyncio.create_task(_embedded_statement_relay())
+
+    async def _seed_practice_packs() -> None:
+        try:
+            from contestiq_api import duels
+            from contestiq_api.practice_packs.pipeline import ensure_auto_packs_seeded
+
+            duels.seed_builtin_duel_problem_packs()
+            ensure_auto_packs_seeded()
+            logger.info("practice_pack_seed_complete")
+        except Exception:
+            logger.exception("practice_pack_seed_failed")
+
+    asyncio.create_task(_seed_practice_packs())
     yield
 
 

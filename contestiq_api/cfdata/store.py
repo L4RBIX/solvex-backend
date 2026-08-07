@@ -802,10 +802,32 @@ CREATE TABLE IF NOT EXISTS duel_problem_packs (
     judge_tests TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
+    review_state TEXT NOT NULL DEFAULT 'reviewed',
+    checker_type TEXT NOT NULL DEFAULT 'exact',
+    oracle_strategy TEXT,
+    provenance TEXT NOT NULL DEFAULT '{}',
+    quality_report TEXT NOT NULL DEFAULT '{}',
+    mutation_score REAL,
+    test_count INTEGER,
+    activated_at TEXT,
     UNIQUE(problem_id, version)
 );
 CREATE INDEX IF NOT EXISTS idx_duel_problem_packs_active
     ON duel_problem_packs (active, problem_id, version DESC);
+
+CREATE TABLE IF NOT EXISTS practice_pack_jobs (
+    job_id TEXT PRIMARY KEY,
+    problem_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'pending',
+    support_class TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    quality_report TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_practice_pack_jobs_status
+    ON practice_pack_jobs (status, updated_at);
 
 CREATE TABLE IF NOT EXISTS duel_participants (
     duel_id TEXT NOT NULL,
@@ -1113,6 +1135,16 @@ _COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("last_http_status", "INTEGER"),
         ("last_fetch_url", "TEXT"),
         ("fetch_content_hash", "TEXT"),
+    ],
+    "duel_problem_packs": [
+        ("review_state", "TEXT NOT NULL DEFAULT 'reviewed'"),
+        ("checker_type", "TEXT NOT NULL DEFAULT 'exact'"),
+        ("oracle_strategy", "TEXT"),
+        ("provenance", "TEXT NOT NULL DEFAULT '{}'"),
+        ("quality_report", "TEXT NOT NULL DEFAULT '{}'"),
+        ("mutation_score", "REAL"),
+        ("test_count", "INTEGER"),
+        ("activated_at", "TEXT"),
     ],
 }
 
