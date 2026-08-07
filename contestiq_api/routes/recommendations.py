@@ -78,7 +78,11 @@ def daily_queue(payload: DailyQueueRequest, ctx: dict[str, Any] = Depends(entitl
 def today_queue(handle: str = Query(min_length=3, max_length=24),
                 ctx: dict[str, Any] = Depends(entitlements.plan_context)):
     cleaned = validate_handle(handle)
-    result = planner.get_today_queue(cleaned)
+    requesting_user_id = ctx["user"]["user_id"] if ctx.get("user") else None
+    result = planner.get_today_queue(
+        cleaned,
+        requesting_user_id=requesting_user_id,
+    )
     if result is None:
         raise APIError(
             "QUEUE_NOT_FOUND",
@@ -131,7 +135,8 @@ def plan_14_day(payload: PlanRequest, ctx: dict[str, Any] = Depends(entitlements
 
 @router.get("/plans/{plan_id}")
 def plan_by_id(plan_id: str, ctx: dict[str, Any] = Depends(entitlements.plan_context)):
-    plan = planner.get_plan(plan_id)
+    requesting_user_id = ctx["user"]["user_id"] if ctx.get("user") else None
+    plan = planner.get_plan(plan_id, requesting_user_id=requesting_user_id)
     if plan is None:
         raise APIError("PLAN_NOT_FOUND", f"No training plan found with id {plan_id}.", 404)
     return entitlements.shape_plan_response(_with_metadata(plan), ctx)

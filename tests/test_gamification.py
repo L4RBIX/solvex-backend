@@ -387,7 +387,7 @@ def test_gamification_daily_goal_endpoint_shape(client):
     assert response.status_code == 200
     data = response.json()
     assert set(data.keys()) == {"subject", "daily_goal"}
-    assert len(data["daily_goal"]["items"]) == 6
+    assert len(data["daily_goal"]["items"]) == 7
 
 
 def test_gamification_badges_endpoint_shape(client):

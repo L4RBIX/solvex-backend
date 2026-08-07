@@ -28,6 +28,8 @@ Secrets live only in the platform env managers (Railway/Vercel). CI runs
 1. CI green (lint, migration check, secret scan, 300+ tests, typecheck).
 2. Apply `db/migrations/*.sql` in numeric order to the target Postgres
    (Supabase SQL editor). Verify with `scripts/check_migrations.py` locally first.
+   Include `026_cf_verified_completion.sql` before shipping Arena Codeforces
+   check / solved-history (canonical ledger + assignment tables).
 3. Seed once per environment: `POST /api/v1/taxonomy/seed`,
    `POST /api/v1/sync/problemset`, `POST /api/v1/skill-map/rebuild` (admin key).
 4. Deploy backend: `uvicorn contestiq_api.main:app --workers 2` (or platform

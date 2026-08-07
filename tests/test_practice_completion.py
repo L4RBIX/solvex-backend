@@ -175,7 +175,9 @@ def test_accepted_records_completion_event_progress_and_safe_attempt(client, pra
     assert completion["already_completed"] is False
     assert completion["xp_awarded"] == 25
     assert completion["attempt_count"] == 1
-    assert body["progress"] == {"xp_total": 25, "streak": 1}
+    assert body["progress"]["xp_total"] == 25
+    assert body["progress"]["streak"] == 1
+    assert body["progress"]["daily_goal"]["completed_count"] == 1
     assert body["next_problem"]["problem_id"] != "4100A"
     assert body["next_problem"]["queue_item_id"] == body["next_problem"]["recommendation_id"]
 
@@ -193,6 +195,18 @@ def test_accepted_records_completion_event_progress_and_safe_attempt(client, pra
     assert stored_completion["completion_id"] == completion["completion_id"]
     assert event["event_id"] == completion["completion_id"]
     assert event["event_type"] == "practice_problem_completed"
+
+    with store.connect() as conn:
+        canonical = dict(
+            conn.execute(
+                "SELECT * FROM problem_completions WHERE completion_id = ?",
+                (completion["completion_id"],),
+            ).fetchone()
+        )
+    assert canonical["completion_source"] == "solvex_practice_judge"
+    assert canonical["is_historical"] == 0
+    assert canonical["xp_awarded"] == 25
+    assert canonical["assigned_at"]
 
 
 def test_submit_uses_all_locked_pack_tests_and_no_caller_oracle(client, practice_world):
@@ -250,7 +264,9 @@ def test_nonaccepted_and_service_verdicts_never_complete(
     assert body["passed"] is False
     assert body["completion"] is None
     assert body["next_problem"] is None
-    assert body["progress"] == {"xp_total": 0, "streak": 0}
+    assert body["progress"]["xp_total"] == 0
+    assert body["progress"]["streak"] == 0
+    assert body["progress"]["daily_goal"]["completed_count"] == 0
     assert table_count("practice_submissions") == 1
     assert table_count("practice_completions") == 0
     assert table_count("practice_continuations") == 0
@@ -572,7 +588,17 @@ def test_concurrent_terminal_replays_return_one_canonical_cached_response(
             snapshot_number += 1
             value = snapshot_number
         barrier.wait(timeout=10)
-        return {"xp_total": value, "streak": value}
+        return {
+            "xp_total": value,
+            "streak": value,
+            "daily_goal": {
+                "date": "2026-08-03",
+                "completed": False,
+                "completed_count": 0,
+                "required_count": 2,
+                "items": [],
+            },
+        }
 
     def replay() -> dict:
         with TestClient(client.app) as worker:
@@ -592,9 +618,9 @@ def test_concurrent_terminal_replays_return_one_canonical_cached_response(
             ]
 
     assert bodies[0] == bodies[1]
-    assert bodies[0]["progress"] in (
-        {"xp_total": 1, "streak": 1},
-        {"xp_total": 2, "streak": 2},
+    assert (bodies[0]["progress"]["xp_total"], bodies[0]["progress"]["streak"]) in (
+        (1, 1),
+        (2, 2),
     )
     with store.connect() as conn:
         cached = json.loads(

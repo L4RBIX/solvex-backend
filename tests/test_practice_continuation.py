@@ -130,7 +130,7 @@ def _primary_skill(problem_id: str) -> str:
         ).fetchone()[0]
 
 
-def test_selector_reuses_skill_and_rating_relaxation_and_ignores_unbacked_candidate(
+def test_authenticated_selector_uses_full_cf_capable_catalog_and_server_visible_inventory(
     client, world
 ):
     user = make_user(client)
@@ -141,16 +141,24 @@ def test_selector_reuses_skill_and_rating_relaxation_and_ignores_unbacked_candid
             headers=bearer(user),
         )
     body = response.json()
-    assert body["next_problem"]["problem_id"] == "4201A"
+    # Authenticated continuous training can recommend an ordinary Codeforces
+    # task even when it has no SolveX private pack.
+    assert body["next_problem"]["problem_id"] == "4204A"
     assert body["next_problem"]["target_skill"] == _primary_skill("4200A")
-    assert body["next_problem"]["rating"] == 1100
-    assert body["next_problem"]["problem_id"] != "4204A"  # nearer but has no reviewed pack
+    assert body["next_problem"]["rating"] == 1025
 
     other = make_user(client)
+    for problem_id in ("4204A", "4201A"):
+        opened = client.post(
+            "/api/v1/practice/open",
+            json={"problem_id": problem_id, "source": "direct_arena"},
+            headers=bearer(other),
+        )
+        assert opened.status_code == 200
     with patch("contestiq_api.judge0_client.run_submission", accepted_mock()):
         relaxed = client.post(
             "/api/v1/practice/submit",
-            json=submit_payload("4200A", "relaxed", visible=["4201A"]),
+            json=submit_payload("4200A", "relaxed"),
             headers=bearer(other),
         ).json()
     assert relaxed["next_problem"]["problem_id"] == "4202A"
@@ -158,7 +166,7 @@ def test_selector_reuses_skill_and_rating_relaxation_and_ignores_unbacked_candid
     assert relaxed["next_problem"]["target_skill"] == _primary_skill("4200A")
 
 
-def test_selector_rejects_problem_when_latest_active_pack_is_incomplete(client, world):
+def test_guest_private_pack_selector_rejects_latest_incomplete_pack(client, world):
     with store.connect() as conn:
         conn.execute(
             """
@@ -176,12 +184,10 @@ def test_selector_rejects_problem_when_latest_active_pack_is_incomplete(client, 
             (store._now(),),
         )
 
-    user = make_user(client)
     with patch("contestiq_api.judge0_client.run_submission", accepted_mock()):
         response = client.post(
             "/api/v1/practice/submit",
             json=submit_payload("4200A", "latest-incomplete"),
-            headers=bearer(user),
         )
 
     assert response.status_code == 200
@@ -198,24 +204,33 @@ def test_current_visible_completed_and_persisted_continuations_never_repeat(clie
             headers=bearer(user),
         ).json()
         first_next = first["next_problem"]
+        opened = client.post(
+            "/api/v1/practice/open",
+            json={"problem_id": "4202A", "source": "direct_arena"},
+            headers=bearer(user),
+        )
+        assert opened.status_code == 200
         second = client.post(
             "/api/v1/practice/submit",
             json=submit_payload(
-                first_next["problem_id"],
+                "4201A",
                 "second",
-                queue_item_id=first_next["queue_item_id"],
-                visible=["4202A"],
             ),
             headers=bearer(user),
         ).json()
 
-    assert first_next["problem_id"] == "4201A"
+    assert first_next["problem_id"] == "4204A"
     assert second["next_problem"]["problem_id"] == "4203A"
-    assert second["next_problem"]["problem_id"] not in {"4200A", "4201A", "4202A"}
+    assert second["next_problem"]["problem_id"] not in {
+        "4200A",
+        "4201A",
+        "4202A",
+        "4204A",
+    }
     progress = client.get("/api/v1/practice/progress", headers=bearer(user)).json()
     assert progress["total_completed"] == 2
     assert set(progress["completed_problem_ids"]) == {"4200A", "4201A"}
-    assert progress["continuation_items"] == [second["next_problem"]]
+    assert progress["continuation_items"] == [first_next, second["next_problem"]]
     assert progress["queue"] == {
         "exhausted": False,
         "message": "A continuation problem is ready.",
@@ -225,7 +240,7 @@ def test_current_visible_completed_and_persisted_continuations_never_repeat(clie
             "SELECT problem_id, status FROM practice_continuations ORDER BY created_at"
         ).fetchall()
     assert [(row["problem_id"], row["status"]) for row in statuses] == [
-        ("4201A", "completed"),
+        ("4204A", "active"),
         ("4203A", "active"),
     ]
 
@@ -299,19 +314,25 @@ def test_verified_handle_official_solve_is_excluded(client, world):
             json=submit_payload("4200A", "history"),
             headers=bearer(user),
         ).json()
-    assert body["next_problem"]["problem_id"] == "4202A"
+    assert body["next_problem"]["problem_id"] == "4204A"
     assert body["next_problem"]["problem_id"] != "4201A"
 
 
 def test_exhaustion_is_structured_and_persisted_per_completion(client, world):
     user = make_user(client)
+    for problem_id in ("4201A", "4202A", "4203A", "4204A"):
+        opened = client.post(
+            "/api/v1/practice/open",
+            json={"problem_id": problem_id, "source": "direct_arena"},
+            headers=bearer(user),
+        )
+        assert opened.status_code == 200
     with patch("contestiq_api.judge0_client.run_submission", accepted_mock()):
         response = client.post(
             "/api/v1/practice/submit",
             json=submit_payload(
                 "4200A",
                 "exhausted",
-                visible=["4201A", "4202A", "4203A"],
             ),
             headers=bearer(user),
         )
@@ -413,7 +434,7 @@ def test_personalized_world_load_failure_never_falls_back_to_unrestricted_candid
     assert progress["queue"] == body["queue"]
 
 
-def _seed_daily_items(handle: str) -> tuple[str, str]:
+def _seed_daily_items(handle: str, *, owner_user_id: str) -> tuple[str, str]:
     current_item = str(uuid.uuid4())
     sibling_item = str(uuid.uuid4())
     run_id = str(uuid.uuid4())
@@ -423,11 +444,11 @@ def _seed_daily_items(handle: str) -> tuple[str, str]:
         conn.execute(
             """
             INSERT INTO recommendation_runs (
-                run_id, handle, analysis_run_id, queue_date, recent_struggle,
+                run_id, handle, owner_user_id, analysis_run_id, queue_date, recent_struggle,
                 warnings, created_at
-            ) VALUES (?, ?, NULL, '2026-07-29', 0, '[]', ?)
+            ) VALUES (?, ?, ?, NULL, '2026-07-29', 0, '[]', ?)
             """,
-            (run_id, store.canonical_handle(handle), now),
+            (run_id, store.canonical_handle(handle), owner_user_id, now),
         )
         for slot, item_id, problem_id in (
             (1, current_item, "4200A"),
@@ -450,7 +471,10 @@ def test_owned_queue_context_marks_only_verified_handle_items_and_excludes_sibli
     client, world
 ):
     owner = make_user(client, "QueueOwner")
-    current_item, sibling_item = _seed_daily_items("QueueOwner")
+    current_item, sibling_item = _seed_daily_items(
+        "QueueOwner",
+        owner_user_id=owner["user_id"],
+    )
     with patch("contestiq_api.judge0_client.run_submission", accepted_mock()):
         body = client.post(
             "/api/v1/practice/submit",
@@ -474,8 +498,11 @@ def test_owned_queue_context_marks_only_verified_handle_items_and_excludes_sibli
 
 
 def test_unverified_or_wrong_owner_cannot_borrow_or_mutate_queue_context(client, world):
-    _owner = make_user(client, "RealOwner")
-    current_item, _sibling = _seed_daily_items("RealOwner")
+    owner = make_user(client, "RealOwner")
+    current_item, _sibling = _seed_daily_items(
+        "RealOwner",
+        owner_user_id=owner["user_id"],
+    )
     attacker = make_user(client)  # no verified handle
     with patch("contestiq_api.judge0_client.run_submission", accepted_mock()):
         body = client.post(

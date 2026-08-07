@@ -54,7 +54,7 @@ EVENT_LABELS: dict[str, str] = {
     "plan_started": "Started a training plan",
     "duel_completed": "Completed a friend duel",
     "duel_won": "Won a friend duel",
-    "practice_problem_completed": "Completed a SolveX practice problem",
+    "practice_problem_completed": "Completed a verified training problem",
 }
 
 # Daily XP cap by plan. Team/event/admin share a single higher beta ceiling
@@ -131,6 +131,11 @@ DAILY_GOAL_REQUIRED_COUNT = 2
 
 # (goal_id, label, event types that satisfy this goal item)
 GOAL_ITEM_DEFS: tuple[tuple[str, str, frozenset[str]], ...] = (
+    (
+        "problem_completed",
+        "Complete a verified training problem",
+        frozenset({"practice_problem_completed"}),
+    ),
     ("analysis_completed", "Complete an analysis", frozenset({"first_analysis_completed"})),
     ("queue_generated", "Generate today's queue", frozenset({"first_queue_generated", "daily_queue_generated"})),
     ("feedback_submitted", "Give feedback on a problem", frozenset({"feedback_submitted"})),
@@ -385,6 +390,11 @@ def compute_recent_xp_events(
 # daily cap. Completion is judged per UTC day / ISO week (Monday start).
 
 DAILY_QUEST_DEFS: tuple[tuple[str, str, frozenset[str]], ...] = (
+    (
+        "complete_problem_today",
+        "Complete a verified training problem",
+        frozenset({"practice_problem_completed"}),
+    ),
     ("complete_analysis_today", "Complete an analysis", frozenset({"first_analysis_completed"})),
     ("generate_queue_today", "Generate today's queue", frozenset({"first_queue_generated", "daily_queue_generated"})),
     ("submit_feedback_today", "Give feedback on one recommendation", frozenset({"feedback_submitted"})),
