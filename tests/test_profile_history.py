@@ -184,7 +184,50 @@ def test_yearly_monthly_counters_and_streaks():
     assert summary["solvedLastYear"] == 3  # excludes ancient
     assert summary["currentStreakDays"] == 2
     assert summary["longestStreakDays"] >= 2
+    assert summary["longestStreakThisYear"] >= 2
+    assert summary["longestStreakThisMonth"] == 2
+    assert summary["mostActiveMonth"] is not None
     assert summary["timezone"] == "UTC"
+
+
+def test_public_profile_maps_avatar_and_metadata():
+    from contestiq_api.profile_history import build_public_profile
+
+    profile = build_public_profile(
+        {
+            "handle": "tourist",
+            "firstName": "Gennady",
+            "lastName": "Korotkevich",
+            "country": "Belarus",
+            "city": "Gomel",
+            "organization": "ITMO",
+            "contribution": 55,
+            "friendOfCount": 10,
+            "rating": 3800,
+            "maxRating": 4000,
+            "rank": "legendary grandmaster",
+            "maxRank": "legendary grandmaster",
+            "avatar": "https://userpic.codeforces.org/422/avatar/x.jpg",
+            "titlePhoto": "https://userpic.codeforces.org/422/title/x.jpg",
+            "registrationTimeSeconds": 1_200_000_000,
+            "lastOnlineTimeSeconds": int(datetime.now(timezone.utc).timestamp()),
+        }
+    )
+    assert profile["realName"] == "Gennady Korotkevich"
+    assert profile["avatarUrl"].endswith("title/x.jpg")
+    assert profile["city"] == "Gomel"
+    assert profile["online"] is True
+    assert profile["profileUrl"].endswith("/tourist")
+
+    blank = build_public_profile(
+        {
+            "handle": "nobody",
+            "avatar": "https://userpic.codeforces.org/no-avatar.jpg",
+            "titlePhoto": "https://userpic.codeforces.org/no-title.jpg",
+        }
+    )
+    assert blank["avatarUrl"] == ""
+    assert blank["online"] is False
 
 
 def test_build_codeforces_history_empty_rating_for_unrated():
