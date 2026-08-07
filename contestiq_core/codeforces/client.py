@@ -7,7 +7,15 @@ from typing import Any
 
 import requests
 
-from contestiq_core.config import CACHE_DIR, CODEFORCES_API_BASE, DEFAULT_TIMEOUT_SECONDS, MAX_RETRIES, RATE_LIMIT_SECONDS
+from contestiq_core.config import (
+    CACHE_DIR,
+    CODEFORCES_API_BASE,
+    CODEFORCES_CACHE_TTL_SECONDS,
+    DEFAULT_CODEFORCES_CACHE_TTL_SECONDS,
+    DEFAULT_TIMEOUT_SECONDS,
+    MAX_RETRIES,
+    RATE_LIMIT_SECONDS,
+)
 
 _last_request_at = 0.0
 
@@ -26,7 +34,25 @@ def _cache_path(endpoint: str, params: dict[str, Any] | None) -> Path:
     return CACHE_DIR / f"{safe_endpoint}{'_' + suffix if suffix else ''}.json"
 
 
-def _request(endpoint: str, params: dict[str, Any] | None = None, use_cache: bool = True) -> Any:
+def _cache_ttl_seconds(endpoint: str) -> int:
+    return int(CODEFORCES_CACHE_TTL_SECONDS.get(endpoint, DEFAULT_CODEFORCES_CACHE_TTL_SECONDS))
+
+
+def _cache_is_fresh(path: Path, *, max_age_seconds: int | None, endpoint: str) -> bool:
+    if not path.exists():
+        return False
+    ttl = _cache_ttl_seconds(endpoint) if max_age_seconds is None else max(0, int(max_age_seconds))
+    age = time.time() - path.stat().st_mtime
+    return age <= ttl
+
+
+def _request(
+    endpoint: str,
+    params: dict[str, Any] | None = None,
+    use_cache: bool = True,
+    *,
+    max_age_seconds: int | None = None,
+) -> Any:
     global _last_request_at
     # Ownership verification must be a genuinely live read.  In particular,
     # disabling the cache means *neither* consulting nor refreshing the public
@@ -34,7 +60,7 @@ def _request(endpoint: str, params: dict[str, Any] | None = None, use_cache: boo
     # ordinary cached read observe verification material after the user has
     # removed it from Codeforces.
     path = _cache_path(endpoint, params) if use_cache else None
-    if path is not None and path.exists():
+    if path is not None and _cache_is_fresh(path, max_age_seconds=max_age_seconds, endpoint=endpoint):
         return json.loads(path.read_text(encoding="utf-8"))
 
     url = f"{CODEFORCES_API_BASE}/{endpoint}"
@@ -48,12 +74,17 @@ def _request(endpoint: str, params: dict[str, Any] | None = None, use_cache: boo
             response = requests.get(url, params=params or {}, timeout=DEFAULT_TIMEOUT_SECONDS)
         except Exception as exc:
             if attempt == MAX_RETRIES:
+                # Prefer a still-readable stale cache over hard failure when CF is down.
+                if path is not None and path.exists():
+                    return json.loads(path.read_text(encoding="utf-8"))
                 raise CodeforcesAPIError(f"Codeforces request failed for {endpoint}: {exc}") from exc
             time.sleep(0.75 * attempt)
             continue
 
         if response.status_code == 429:
             if attempt >= MAX_RETRIES:
+                if path is not None and path.exists():
+                    return json.loads(path.read_text(encoding="utf-8"))
                 raise CodeforcesAPIError(
                     f"Codeforces returned HTTP 429 after {MAX_RETRIES} retries (rate limited)"
                 )
@@ -79,6 +110,8 @@ def _request(endpoint: str, params: dict[str, Any] | None = None, use_cache: boo
             payload = response.json()
         except Exception as exc:
             if attempt == MAX_RETRIES:
+                if path is not None and path.exists():
+                    return json.loads(path.read_text(encoding="utf-8"))
                 raise CodeforcesAPIError(f"Codeforces request failed for {endpoint}: {exc}") from exc
             time.sleep(0.75 * attempt)
             continue
@@ -86,6 +119,8 @@ def _request(endpoint: str, params: dict[str, Any] | None = None, use_cache: boo
         if payload.get("status") != "OK":
             comment = payload.get("comment", "unknown Codeforces API error")
             if attempt == MAX_RETRIES:
+                if path is not None and path.exists():
+                    return json.loads(path.read_text(encoding="utf-8"))
                 raise CodeforcesAPIError(f"Codeforces API error for {endpoint}: {comment}")
             time.sleep(0.75 * attempt)
             continue
@@ -98,27 +133,57 @@ def _request(endpoint: str, params: dict[str, Any] | None = None, use_cache: boo
     raise CodeforcesAPIError(f"Codeforces request failed for {endpoint}")
 
 
-def fetch_user_status(handle: str, count: int | None = None) -> list[dict[str, Any]]:
+def fetch_user_status(
+    handle: str,
+    count: int | None = None,
+    *,
+    use_cache: bool = True,
+    max_age_seconds: int | None = None,
+) -> list[dict[str, Any]]:
     params: dict[str, Any] = {"handle": handle}
     if count is not None:
         params["from"] = 1
         params["count"] = count
-    return _request("user.status", params)
+    return _request(
+        "user.status",
+        params,
+        use_cache=use_cache,
+        max_age_seconds=max_age_seconds,
+    )
 
 
-def fetch_user_rating(handle: str) -> list[dict[str, Any]]:
-    return _request("user.rating", {"handle": handle})
+def fetch_user_rating(
+    handle: str,
+    *,
+    use_cache: bool = True,
+    max_age_seconds: int | None = None,
+) -> list[dict[str, Any]]:
+    return _request(
+        "user.rating",
+        {"handle": handle},
+        use_cache=use_cache,
+        max_age_seconds=max_age_seconds,
+    )
 
 
-def fetch_user_info(handle: str, use_cache: bool = True) -> dict[str, Any]:
+def fetch_user_info(handle: str, use_cache: bool = True, *, max_age_seconds: int | None = None) -> dict[str, Any]:
     """`use_cache=False` forces a live fetch — required for handle-ownership
     verification, where a stale cached profile would let a claim pass on a
     since-changed field, or fail on a just-edited one."""
-    result = _request("user.info", {"handles": handle}, use_cache=use_cache)
+    result = _request(
+        "user.info",
+        {"handles": handle},
+        use_cache=use_cache,
+        max_age_seconds=max_age_seconds,
+    )
     if not result:
         raise CodeforcesAPIError(f"Codeforces handle not found: {handle}")
     return result[0]
 
 
-def fetch_problemset_problems() -> dict[str, Any]:
-    return _request("problemset.problems")
+def fetch_problemset_problems(*, use_cache: bool = True, max_age_seconds: int | None = None) -> dict[str, Any]:
+    return _request(
+        "problemset.problems",
+        use_cache=use_cache,
+        max_age_seconds=max_age_seconds,
+    )
