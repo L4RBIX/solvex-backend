@@ -11,6 +11,17 @@ DEFAULT_TIMEOUT_SECONDS = 20
 MAX_RETRIES = 3
 RATE_LIMIT_SECONDS = 2.0
 
+# Disk-cache TTLs for public Codeforces GETs. A missing/zero TTL means the
+# entry never expires (legacy behavior) — prefer an explicit value for any
+# endpoint whose freshness affects user-facing metrics such as solved count.
+CODEFORCES_CACHE_TTL_SECONDS: dict[str, int] = {
+    "user.status": 15 * 60,
+    "user.rating": 15 * 60,
+    "user.info": 15 * 60,
+    "problemset.problems": 24 * 60 * 60,
+}
+DEFAULT_CODEFORCES_CACHE_TTL_SECONDS = 15 * 60
+
 DEFAULT_OVERALL_RATING = 1200
 
 

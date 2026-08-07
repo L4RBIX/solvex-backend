@@ -385,6 +385,7 @@ def test_legacy_compat_shape_matches_frontend_contract(tmp_path, monkeypatch):
         "ratingComfortZone",
         "recommendedProblems",
         "sevenDayQueue",
+        "codeforcesHistory",
     }
     assert result["profile"]["rating"] == 1400
     assert result["profile"]["organization"] == ""
@@ -434,14 +435,17 @@ def test_compat_route_serves_legacy_shape(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     import contestiq_api.routes.v1 as v1
 
-    monkeypatch.setattr(v1, "fetch_user_info", lambda handle: _fixture_user())
-    monkeypatch.setattr(v1, "fetch_user_status", lambda handle, count=None: _fixture_submissions())
+    monkeypatch.setattr(v1, "fetch_user_info", lambda handle, **kwargs: _fixture_user())
+    monkeypatch.setattr(v1, "fetch_user_status", lambda handle, count=None, **kwargs: _fixture_submissions())
+    monkeypatch.setattr(v1, "fetch_user_rating", lambda handle, **kwargs: [])
     response = client.get("/api/v1/compat/analyze/fixture-user")
     assert response.status_code == 200
     data = response.json()
     assert data["handle"] == "fixture-user"
     assert "frictionAreas" in data
     assert "sevenDayQueue" in data
+    assert "codeforcesHistory" in data
+    assert data["summary"]["uniqueSolved"] == data["codeforcesHistory"]["summary"]["solvedAllTime"]
     assert data["_meta"]["analysis_version"] == "ml_core_v0.4"
 
 
@@ -451,8 +455,9 @@ def test_compat_retry_queue_is_filtered_only_for_verified_owner(tmp_path, monkey
     from contestiq_api import auth, handles
     from contestiq_api.cfdata import store
 
-    monkeypatch.setattr(v1, "fetch_user_info", lambda handle: _fixture_user())
-    monkeypatch.setattr(v1, "fetch_user_status", lambda handle, count=None: _fixture_submissions())
+    monkeypatch.setattr(v1, "fetch_user_info", lambda handle, **kwargs: _fixture_user())
+    monkeypatch.setattr(v1, "fetch_user_status", lambda handle, count=None, **kwargs: _fixture_submissions())
+    monkeypatch.setattr(v1, "fetch_user_rating", lambda handle, **kwargs: [])
 
     store.save_problemset_snapshot(
         {
@@ -554,7 +559,7 @@ def test_compat_route_maps_not_found(tmp_path, monkeypatch):
     import contestiq_api.routes.v1 as v1
     from contestiq_core.codeforces.client import CodeforcesAPIError
 
-    def _missing(handle):
+    def _missing(handle, **kwargs):
         raise CodeforcesAPIError("Codeforces handle not found: ghost-user-404")
 
     monkeypatch.setattr(v1, "fetch_user_info", _missing)

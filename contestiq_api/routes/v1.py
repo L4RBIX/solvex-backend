@@ -22,7 +22,12 @@ from contestiq_api.routes.health import health as legacy_health
 from contestiq_api.service import analyze_codeforces_handle, get_saved_analysis, validate_handle
 from contestiq_api.settings import get_settings
 from contestiq_api.versions import ANALYSIS_VERSION, PROBLEM_CATALOG_VERSION, TAXONOMY_VERSION
-from contestiq_core.codeforces.client import CodeforcesAPIError, fetch_user_info, fetch_user_status
+from contestiq_core.codeforces.client import (
+    CodeforcesAPIError,
+    fetch_user_info,
+    fetch_user_rating,
+    fetch_user_status,
+)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -176,8 +181,15 @@ def compat_legacy_analysis(handle: str, request: Request):
     cleaned = validate_handle(handle)
     caller = auth.current_user(request)
     try:
-        user = fetch_user_info(cleaned)
-        submissions = fetch_user_status(cleaned)
+        # Short TTL cache (see contestiq_core.codeforces.client) — never reuse an
+        # eternal disk snapshot for solved-count / history metrics.
+        user = fetch_user_info(cleaned, max_age_seconds=15 * 60)
+        submissions = fetch_user_status(cleaned, max_age_seconds=15 * 60)
+        try:
+            rating_history = fetch_user_rating(cleaned, max_age_seconds=15 * 60)
+        except CodeforcesAPIError:
+            # Unrated / empty rating history is normal; keep analysis available.
+            rating_history = []
     except CodeforcesAPIError as exc:
         message = str(exc)
         lowered = message.lower()
@@ -191,7 +203,7 @@ def compat_legacy_analysis(handle: str, request: Request):
             raise APIError("CODEFORCES_HANDLE_NOT_FOUND", f"Codeforces handle was not found: {cleaned}", 404) from exc
         raise APIError("CODEFORCES_UNAVAILABLE", "Codeforces API is temporarily unavailable. Try again later.", 502) from exc
 
-    result = legacy_analysis(user, submissions)
+    result = legacy_analysis(user, submissions, rating_history)
     constraints = planner.owner_practice_constraints(
         cleaned,
         caller["user_id"] if caller else None,

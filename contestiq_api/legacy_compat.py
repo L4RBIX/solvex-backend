@@ -13,6 +13,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from contestiq_api.profile_history import build_codeforces_history, problem_identity
+
 V_AC = "OK"
 V_WA = "WRONG_ANSWER"
 V_TLE = "TIME_LIMIT_EXCEEDED"
@@ -65,8 +67,10 @@ def _js_round(value: float) -> int:
 
 
 def _problem_key(sub: dict[str, Any]) -> str:
-    cid = sub.get("problem", {}).get("contestId") or sub.get("contestId") or 0
-    return f"{cid}:{sub.get('problem', {}).get('index')}"
+    # All-time solved / attempt rollups must preserve unusual legitimate CF
+    # identities (gym, missing contestId + problemsetName). Recommendation
+    # eligibility remains separately gated by catalog / judgeable IDs.
+    return problem_identity(sub)
 
 
 def _legacy_problem_id(item: dict[str, Any]) -> str | None:
@@ -146,7 +150,11 @@ def _build_problem_map(submissions: list[dict[str, Any]]) -> dict[str, dict[str,
     return problems
 
 
-def legacy_analysis(user: dict[str, Any], submissions: list[dict[str, Any]]) -> dict[str, Any]:
+def legacy_analysis(
+    user: dict[str, Any],
+    submissions: list[dict[str, Any]],
+    rating_history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Compute the legacy AnalysisResult shape from raw Codeforces API payloads."""
     problem_map = _build_problem_map(submissions)
     all_problems = list(problem_map.values())
@@ -397,6 +405,11 @@ def legacy_analysis(user: dict[str, Any], submissions: list[dict[str, Any]]) -> 
         )
 
     handle = user.get("handle", "")
+    history = build_codeforces_history(user, submissions, rating_history)
+    # Keep summary.uniqueSolved aligned with the explicit all-time metric so
+    # header / cards / heatmap summaries cannot diverge.
+    unique_solved = int(history["summary"]["solvedAllTime"])
+
     top_tag = top_friction[0] if top_friction else None
     strong_tag = top_strong[0] if top_strong else None
     if top_tag:
@@ -436,4 +449,5 @@ def legacy_analysis(user: dict[str, Any], submissions: list[dict[str, Any]]) -> 
         "ratingComfortZone": {"min": comfort_min, "max": comfort_max, "sweet": comfort_sweet},
         "recommendedProblems": recommended_problems,
         "sevenDayQueue": seven_day_queue,
+        "codeforcesHistory": history,
     }
