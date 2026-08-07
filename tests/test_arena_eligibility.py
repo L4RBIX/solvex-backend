@@ -34,7 +34,17 @@ def _catalog():
             "name": "Theatre Square",
             "rating": 1000,
         },
+        "2228B": {
+            "problem_key": "2228B",
+            "contest_id": 2228,
+            "problem_index": "B",
+            "name": "Remilia Plays Soku",
+            "rating": 1100,
+        },
     }
+
+
+DISPLAY_READY = {"650A", "1225D", "1A"}
 
 
 def _lookup(key: str):
@@ -49,6 +59,10 @@ def _by_name(name: str, rating):
         if rating is None or row.get("rating") == rating:
             rows.append(row)
     return rows
+
+
+def _display_ready(problem_id: str) -> bool:
+    return problem_id in DISPLAY_READY
 
 
 CONTESTS = [
@@ -93,6 +107,25 @@ def test_unavailable_catalog_problem_is_dropped():
         contests=CONTESTS,
         lookup=_lookup,
         by_name=_by_name,
+        display_ready=_display_ready,
+    )
+    assert item is None
+
+
+def test_2228B_catalog_hit_without_statement_is_not_arena_capable():
+    """Regression: Remilia Plays Soku is in CF catalog but has no displayable statement."""
+    item = attach_arena_identity(
+        {
+            "name": "Remilia Plays Soku",
+            "contestId": 2228,
+            "index": "B",
+            "rating": 1100,
+            "tags": ["games", "implementation"],
+        },
+        contests=CONTESTS,
+        lookup=_lookup,
+        by_name=_by_name,
+        display_ready=_display_ready,
     )
     assert item is None
 
@@ -103,6 +136,7 @@ def test_select_recommendations_never_emits_mirror_ids():
         {"name": "Power Products", "contestId": 1246, "index": "B", "rating": 1800, "tags": ["math"]},
         {"name": "Theatre Square", "contestId": 1, "index": "A", "rating": 1000, "tags": ["math"]},
         {"name": "Ghost", "contestId": 999999, "index": "Z", "rating": 900, "tags": ["math"]},
+        {"name": "Remilia Plays Soku", "contestId": 2228, "index": "B", "rating": 1100, "tags": ["games"]},
     ]
     selected = select_arena_recommendations(
         candidates,
@@ -110,11 +144,13 @@ def test_select_recommendations_never_emits_mirror_ids():
         contests=CONTESTS,
         lookup=_lookup,
         by_name=_by_name,
+        display_ready=_display_ready,
     )
     ids = {f"{item['contestId']}{item['index']}" for item in selected}
     assert "651C" not in ids
     assert "1246B" not in ids
     assert "999999Z" not in ids
+    assert "2228B" not in ids
     assert "650A" in ids
     assert "1225D" in ids
     assert "1A" in ids
@@ -141,6 +177,10 @@ def _sub(sid, contest_id, index, verdict, *, ts, name, rating, tags):
 def test_legacy_analysis_rewrites_mirror_recommendations(monkeypatch):
     monkeypatch.setattr("contestiq_api.cfdata.store.get_problem", _lookup)
     monkeypatch.setattr("contestiq_api.cfdata.store.find_problems_by_name_rating", _by_name)
+    monkeypatch.setattr(
+        "contestiq_api.cfdata.store.is_problem_statement_display_ready",
+        _display_ready,
+    )
 
     user = {"handle": "fixture", "rating": 1600, "maxRating": 1700, "rank": "expert", "maxRank": "expert"}
     # Many WA attempts on mirror IDs so they become recommendation candidates.

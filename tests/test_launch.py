@@ -93,6 +93,9 @@ def build_world(extra_solves=0):
             problems[f"{base + i}B"] = {"contestId": base + i, "index": "B", "name": f"{tag} d{i}",
                                         "rating": 1250 + i * 40, "tags": [tag]}
     store.save_problemset_snapshot({"problems": list(problems.values()), "problemStatistics": []})
+    from _statement_fixtures import seed_display_ready_statements
+
+    seed_display_ready_statements()
     taxonomy.build_problem_skill_map()
     episodes.rebuild_episodes(HANDLE)
     weakness.analyze_handle_weakness(HANDLE)

@@ -5,18 +5,21 @@ Codeforces Div1/Div2/Technocup mirrors share a statement but use different
 mirror (e.g. ``651C``) while SolveX's catalog only imports
 ``problemset.problems`` keys (e.g. ``650A``).
 
-Any surface that emits ``Solve in Arena`` must resolve to a catalog key first.
+Any surface that emits ``Solve in Arena`` must resolve to a catalog key that
+also has a display-ready imported statement. Catalog membership alone is not
+enough — problems like ``2228B`` can exist in ``problems`` without statement
+content.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import Any, Callable
 
 from contestiq_core.codeforces.normalizer import stable_problem_key
 
 CatalogLookup = Callable[[str], dict[str, Any] | None]
 CatalogByName = Callable[[str, Any], list[dict[str, Any]]]
+DisplayReadyCheck = Callable[[str], bool]
 
 
 def arena_problem_id(contest_id: Any, index: Any) -> str | None:
@@ -40,6 +43,34 @@ def _contest_start_map(contests: list[dict[str, Any]] | None) -> dict[int, int]:
         except (KeyError, TypeError, ValueError):
             continue
     return starts
+
+
+def is_arena_solvable(
+    problem_id: str,
+    *,
+    lookup: CatalogLookup | None = None,
+    display_ready: DisplayReadyCheck | None = None,
+) -> bool:
+    """Authoritative Solo Arena capability predicate.
+
+    Requires:
+    - canonical catalog identity in ``problems``
+    - imported ``problem_statements`` row with ``display_ready`` and non-empty statement
+    """
+    if not problem_id or not isinstance(problem_id, str):
+        return False
+    if lookup is None:
+        from contestiq_api.cfdata import store
+
+        lookup = store.get_problem
+    if display_ready is None:
+        from contestiq_api.cfdata import store
+
+        display_ready = store.is_problem_statement_display_ready
+
+    if lookup(problem_id) is None:
+        return False
+    return bool(display_ready(problem_id))
 
 
 def resolve_arena_catalog_problem(
@@ -132,8 +163,9 @@ def attach_arena_identity(
     contests: list[dict[str, Any]] | None = None,
     lookup: CatalogLookup | None = None,
     by_name: CatalogByName | None = None,
+    display_ready: DisplayReadyCheck | None = None,
 ) -> dict[str, Any] | None:
-    """Rewrite a recommendation/queue row onto a catalog identity.
+    """Rewrite a recommendation/queue row onto a catalog + statement-ready identity.
 
     Returns None when the row named a concrete problem that is not Arena-capable.
     Focus-only rows (no contestId/index) pass through unchanged.
@@ -160,6 +192,13 @@ def attach_arena_identity(
             "name": resolved.get("name"),
         }
     )
+    if not is_arena_solvable(
+        str(problem_key),
+        lookup=lookup,
+        display_ready=display_ready,
+    ):
+        return None
+
     return {
         **item,
         "contestId": resolved.get("contest_id"),
@@ -178,9 +217,10 @@ def filter_arena_capable_items(
     contests: list[dict[str, Any]] | None = None,
     lookup: CatalogLookup | None = None,
     by_name: CatalogByName | None = None,
+    display_ready: DisplayReadyCheck | None = None,
     keep_focus_only: bool = True,
 ) -> list[dict[str, Any]]:
-    """Keep focus-only rows; rewrite or drop concrete problems lacking Arena catalog rows."""
+    """Keep focus-only rows; rewrite or drop concrete problems lacking Arena capability."""
     out: list[dict[str, Any]] = []
     for item in items:
         has_concrete = item.get("contestId") is not None and bool(item.get("index"))
@@ -189,6 +229,7 @@ def filter_arena_capable_items(
             contests=contests,
             lookup=lookup,
             by_name=by_name,
+            display_ready=display_ready,
         )
         if rewritten is None:
             continue
@@ -205,6 +246,7 @@ def select_arena_recommendations(
     contests: list[dict[str, Any]] | None = None,
     lookup: CatalogLookup | None = None,
     by_name: CatalogByName | None = None,
+    display_ready: DisplayReadyCheck | None = None,
 ) -> list[dict[str, Any]]:
     """Prefer Arena-capable rewrites until ``limit`` slots are filled."""
     selected: list[dict[str, Any]] = []
@@ -215,6 +257,7 @@ def select_arena_recommendations(
             contests=contests,
             lookup=lookup,
             by_name=by_name,
+            display_ready=display_ready,
         )
         if rewritten is None or not rewritten.get("arenaAvailable"):
             continue

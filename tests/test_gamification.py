@@ -449,6 +449,9 @@ def test_daily_queue_generated_event_fires_once_per_day_not_per_call(client):
         problems[f"{7000 + i}B"] = {"contestId": 7000 + i, "index": "B", "name": f"greedy {i}",
                                      "rating": 1200 + i * 20, "tags": ["greedy"]}
     store.save_problemset_snapshot({"problems": list(problems.values()), "problemStatistics": []})
+    from _statement_fixtures import seed_display_ready_statements
+
+    seed_display_ready_statements()
     taxonomy.build_problem_skill_map()
     episodes.rebuild_episodes(handle)
     weakness.analyze_handle_weakness(handle)

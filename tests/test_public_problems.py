@@ -256,10 +256,17 @@ def test_statement_content_is_served_when_imported(client, catalog):
         assert forbidden not in serialized
 
 
-def test_problem_without_imported_statement_has_null_statement_content(client, catalog):
+def test_problem_without_imported_statement_has_missing_statement_content(client, catalog):
     response = client.get("/api/v1/problems/1364B")
     assert response.status_code == 200
-    assert response.json()["statement_content"] is None
+    body = response.json()
+    assert body["arena_capable"] is False
+    content = body["statement_content"]
+    assert content is not None
+    assert content["availability"]["status"] == "missing"
+    assert content["availability"]["display_ready"] is False
+    assert content["availability"]["unavailable_reason"] == "Statement not available in SolveX yet."
+    assert "no content record" not in json.dumps(body)
 
 
 def test_newest_active_authored_content_is_selected(client, catalog):

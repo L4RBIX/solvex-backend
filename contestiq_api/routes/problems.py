@@ -83,6 +83,7 @@ class PublicProblemResponse(BaseModel):
     content_available: bool
     authored_content: PublicAuthoredContent | None
     statement_content: PublicStatementContent | None = None
+    arena_capable: bool = False
 
 
 def normalize_problem_id(raw_problem_id: str) -> str:
@@ -162,9 +163,44 @@ def _parse_json_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+USER_FACING_MISSING_STATEMENT = "Statement not available in SolveX yet."
+
+
+def _public_unavailable_reason(status: str | None, reason: str | None) -> str | None:
+    """Never expose internal importer wording to Arena users."""
+    if reason in {None, "", "no content record for this problem_id"}:
+        if (status or "missing") in {"missing", "partial", "asset_required"}:
+            return USER_FACING_MISSING_STATEMENT
+        return USER_FACING_MISSING_STATEMENT if not reason else reason
+    if "no content record" in reason:
+        return USER_FACING_MISSING_STATEMENT
+    return reason
+
+
 def _statement_content(row: dict[str, Any] | None) -> PublicStatementContent | None:
     if row is None:
-        return None
+        return PublicStatementContent(
+            title=None,
+            statement=None,
+            input_format=None,
+            output_format=None,
+            interaction_format=None,
+            examples=[],
+            notes=None,
+            time_limit_seconds=None,
+            memory_limit_megabytes=None,
+            difficulty=None,
+            io_mode=None,
+            is_interactive=False,
+            has_missing_diagrams=False,
+            availability=StatementAvailability(
+                status="missing",
+                display_ready=False,
+                solve_ready=False,
+                unavailable_reason=USER_FACING_MISSING_STATEMENT,
+            ),
+            source=StatementSource(dataset=None, urls=[]),
+        )
 
     examples: list[StatementExample] = []
     for item in _parse_json_list(row.get("samples"))[:50]:
@@ -172,6 +208,8 @@ def _statement_content(row: dict[str, Any] | None) -> PublicStatementContent | N
             examples.append(StatementExample(input=item["input"], output=item["output"]))
 
     urls = [u for u in _parse_json_list(row.get("source_urls")) if isinstance(u, str)]
+    status = row.get("availability_status") or "missing"
+    display_ready = bool(row.get("display_ready")) and bool((row.get("statement") or "").strip())
 
     return PublicStatementContent(
         title=row.get("title"),
@@ -188,10 +226,14 @@ def _statement_content(row: dict[str, Any] | None) -> PublicStatementContent | N
         is_interactive=bool(row.get("is_interactive")),
         has_missing_diagrams=bool(row.get("has_missing_diagrams")),
         availability=StatementAvailability(
-            status=row.get("availability_status") or "missing",
-            display_ready=bool(row.get("display_ready")),
-            solve_ready=bool(row.get("solve_ready")),
-            unavailable_reason=row.get("unavailable_reason"),
+            status=status if display_ready else (status if status != "complete_standard" else "missing"),
+            display_ready=display_ready,
+            solve_ready=bool(row.get("solve_ready")) and display_ready,
+            unavailable_reason=(
+                None
+                if display_ready
+                else _public_unavailable_reason(status, row.get("unavailable_reason"))
+            ),
         ),
         source=StatementSource(dataset=row.get("source_dataset"), urls=urls),
     )
@@ -218,7 +260,10 @@ def _problem_response(raw_problem_id: str) -> PublicProblemResponse:
 
     index = problem_index.upper()
     authored_content = _authored_content(store.get_active_public_problem_content(problem_id))
-    statement_content = _statement_content(store.get_problem_statement(problem_id))
+    statement_row = store.get_problem_statement(problem_id)
+    statement_content = _statement_content(statement_row)
+    from contestiq_api.arena_eligibility import is_arena_solvable
+
     return PublicProblemResponse(
         problem_id=problem_id,
         contest_id=contest_id,
@@ -230,6 +275,7 @@ def _problem_response(raw_problem_id: str) -> PublicProblemResponse:
         content_available=authored_content is not None,
         authored_content=authored_content,
         statement_content=statement_content,
+        arena_capable=is_arena_solvable(problem_id),
     )
 
 
