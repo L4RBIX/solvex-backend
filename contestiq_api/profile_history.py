@@ -414,6 +414,13 @@ def build_activity_summary(
         "streakMetric": "any_submission_moscow",
         "solvedWindowDays": {"lastYear": LAST_YEAR_DAYS, "lastMonth": LAST_MONTH_DAYS},
         "timezone": "Europe/Moscow",
+        # Honest limitation: anonymous user.status is public activity only.
+        "solvedCountBasis": "public_user_status",
+        "solvedCountLimitation": (
+            "Matches Codeforces public activity from user.status. Profiles that "
+            "include private group/mashup solves on the website can show a higher "
+            "all-time total than the public API can reconstruct."
+        ),
     }
 
 

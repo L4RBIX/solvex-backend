@@ -1402,6 +1402,37 @@ def get_problem(problem_key: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def find_problems_by_name_rating(name: str, rating: Any = None) -> list[dict[str, Any]]:
+    """Lookup catalog rows by case-insensitive name, optionally exact rating.
+
+    Used to remap Div1/Div2/Technocup mirror submission IDs onto the single
+    ``problemset.problems`` identity stored in SolveX.
+    """
+    normalized = (name or "").strip().lower()
+    if not normalized:
+        return []
+    with connect() as conn:
+        if rating is None:
+            rows = conn.execute(
+                """
+                SELECT problem_key, contest_id, problem_index, name, rating, tags
+                FROM problems
+                WHERE lower(name) = ?
+                """,
+                (normalized,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT problem_key, contest_id, problem_index, name, rating, tags
+                FROM problems
+                WHERE lower(name) = ? AND rating = ?
+                """,
+                (normalized, rating),
+            ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_active_public_problem_content(problem_key: str) -> dict[str, Any] | None:
     """Return only authored fields safe for the public problem catalog API.
 
