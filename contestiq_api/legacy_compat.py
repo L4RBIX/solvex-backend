@@ -13,13 +13,18 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from contestiq_api.profile_history import build_codeforces_history, problem_identity
+from contestiq_api.profile_history import (
+    build_codeforces_history,
+    build_public_profile,
+    problem_identity,
+)
 
 V_AC = "OK"
 V_WA = "WRONG_ANSWER"
 V_TLE = "TIME_LIMIT_EXCEEDED"
 V_RE = "RUNTIME_ERROR"
-V_CE = "COMPILE_ERROR"
+V_CE = "COMPILATION_ERROR"
+V_CE_LEGACY = "COMPILE_ERROR"
 V_MLE = "MEMORY_LIMIT_EXCEEDED"
 
 SKIP_TAGS = {"*special", "interactive"}
@@ -189,7 +194,7 @@ def legacy_analysis(
             error_breakdown["timeLimitExceeded"] += 1
         elif verdict == V_RE:
             error_breakdown["runtimeError"] += 1
-        elif verdict == V_CE:
+        elif verdict in (V_CE, V_CE_LEGACY):
             error_breakdown["compileError"] += 1
         elif verdict == V_MLE:
             error_breakdown["memoryLimitExceeded"] += 1
@@ -427,20 +432,25 @@ def legacy_analysis(
 
     return {
         "handle": handle,
-        "profile": {
-            "handle": handle,
-            "rating": user.get("rating", 0) or 0,
-            "maxRating": user.get("maxRating", 0) or 0,
-            "rank": user.get("rank") or "unrated",
-            "maxRank": user.get("maxRank") or "unrated",
-            "country": user.get("country") or "",
-            "organization": user.get("organization") or "",
-        },
+        "profile": build_public_profile(user),
         "summary": {
             "totalSubmissions": len(submissions),
             "uniqueSolved": unique_solved,
             "mainLanguage": main_language,
             "avgSolvedRating": avg_solved_rating,
+            "acceptedSubmissions": history["summary"].get("acceptedSubmissions", 0),
+            "avgAttemptsBeforeAC": history["summary"].get("avgAttemptsBeforeAC"),
+            "solvedLastYear": history["summary"].get("solvedLastYear", 0),
+            "solvedLastMonth": history["summary"].get("solvedLastMonth", 0),
+            "currentStreakDays": history["summary"].get("currentStreakDays", 0),
+            "longestStreakDays": history["summary"].get("longestStreakDays", 0),
+            "longestStreakThisYear": history["summary"].get("longestStreakThisYear", 0),
+            "longestStreakThisMonth": history["summary"].get("longestStreakThisMonth", 0),
+            "hardestSolved": history["summary"].get("hardestSolved"),
+            "mostActiveMonth": history["summary"].get("mostActiveMonth"),
+            "mostActiveDay": history["summary"].get("mostActiveDay"),
+            "mostActiveWeekday": history["summary"].get("mostActiveWeekday"),
+            "ratingProgress": history["summary"].get("ratingProgress"),
         },
         "diagnosis": diagnosis,
         "frictionAreas": top_friction,
