@@ -48,6 +48,16 @@ DEFAULT_CORS_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 
+# Trusted SolveX Vercel hosts (production aliases + this project's preview URLs).
+# Intentionally narrow: does not allow arbitrary *.vercel.app origins.
+DEFAULT_CORS_ORIGIN_REGEX = (
+    r"^https://("
+    r"solvex-frontend(-[a-z0-9]+)?\.vercel\.app|"
+    r"solvex-frontend-[a-z0-9-]+-l4rbix1s-projects\.vercel\.app|"
+    r"solvex-cp\.vercel\.app"
+    r")$"
+)
+
 
 def _parse_bool(value: str | None, default: bool) -> bool:
     if value is None:
@@ -68,6 +78,20 @@ def _parse_origins(value: str | None) -> list[str]:
     if value is None or value.strip() == "":
         return list(DEFAULT_CORS_ORIGINS)
     return [origin.strip() for origin in value.split(",") if origin.strip()]
+
+
+def _parse_cors_origin_regex(value: str | None) -> str | None:
+    """Return a CORS origin regex, or None to disable regex matching.
+
+    ``CORS_ORIGIN_REGEX=`` (empty) disables the default SolveX Vercel preview
+    pattern. Unset uses ``DEFAULT_CORS_ORIGIN_REGEX``.
+    """
+    if value is None:
+        return DEFAULT_CORS_ORIGIN_REGEX
+    stripped = value.strip()
+    if stripped == "":
+        return None
+    return stripped
 
 
 def _parse_float(value: str | None, default: float) -> float:
@@ -98,6 +122,7 @@ class Settings:
     app_env: str
     enable_debug_endpoint: bool
     cors_origins: list[str]
+    cors_origin_regex: str | None
     rate_limit_analyze_seconds: int
     judge0_base_url: str = ""
     judge0_api_key: str = ""
@@ -190,6 +215,7 @@ def get_settings() -> Settings:
         app_env=app_env,
         enable_debug_endpoint=_parse_bool(os.getenv("ENABLE_DEBUG_ENDPOINT"), default_debug),
         cors_origins=_parse_origins(os.getenv("CORS_ORIGINS")),
+        cors_origin_regex=_parse_cors_origin_regex(os.getenv("CORS_ORIGIN_REGEX")),
         rate_limit_analyze_seconds=_parse_int(os.getenv("RATE_LIMIT_ANALYZE_SECONDS"), default_rate_limit),
         judge0_base_url=(os.getenv("JUDGE0_BASE_URL") or "").rstrip("/"),
         judge0_api_key=os.getenv("JUDGE0_API_KEY") or "",

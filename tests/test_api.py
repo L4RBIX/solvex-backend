@@ -173,6 +173,55 @@ def test_custom_cors_origins_parse(monkeypatch):
     assert settings.get_settings().cors_origins == ["https://app.example.com", "http://localhost:3000"]
 
 
+def test_default_cors_origin_regex_allows_solvex_vercel_previews(monkeypatch):
+    for name in ["APP_ENV", "ENABLE_DEBUG_ENDPOINT", "CORS_ORIGINS", "CORS_ORIGIN_REGEX"]:
+        monkeypatch.delenv(name, raising=False)
+    import contestiq_api.settings as settings
+
+    importlib.reload(settings)
+    parsed = settings.get_settings()
+    assert parsed.cors_origin_regex
+    import re
+
+    pattern = re.compile(parsed.cors_origin_regex)
+    assert pattern.match("https://solvex-frontend-omega.vercel.app")
+    assert pattern.match("https://solvex-frontend-rewtttm2i-l4rbix1s-projects.vercel.app")
+    assert pattern.match("https://solvex-cp.vercel.app")
+    assert not pattern.match("https://evil-app.vercel.app")
+    assert not pattern.match("https://solvex-frontend-otherteam-projects.vercel.app")
+
+
+def test_cors_origin_regex_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("CORS_ORIGIN_REGEX", "")
+    import contestiq_api.settings as settings
+
+    importlib.reload(settings)
+    assert settings.get_settings().cors_origin_regex is None
+
+
+def test_cors_preview_origin_regex_is_honored(tmp_path, monkeypatch):
+    client = _client(
+        tmp_path,
+        monkeypatch,
+        {
+            "CORS_ORIGINS": "https://solvex-frontend-omega.vercel.app",
+            "CORS_ORIGIN_REGEX": r"^https://solvex-frontend-[a-z0-9]+-l4rbix1s-projects\.vercel\.app$",
+        },
+    )
+    preview = "https://solvex-frontend-rewtttm2i-l4rbix1s-projects.vercel.app"
+    response = client.options(
+        "/api/health",
+        headers={"Origin": preview, "Access-Control-Request-Method": "GET"},
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == preview
+    denied = client.options(
+        "/api/health",
+        headers={"Origin": "https://evil-app.vercel.app", "Access-Control-Request-Method": "GET"},
+    )
+    assert denied.headers.get("access-control-allow-origin") != "https://evil-app.vercel.app"
+
+
 def test_production_settings_defaults(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("ADMIN_API_KEY", "prod-admin-key-0123456789")  # production requires it (Phase 09)
