@@ -117,3 +117,13 @@ Operational metrics: `GET /api/v1/metrics`. Alerts: see runbook table.
   anonymized aggregate metrics, and admin audit entries (legal/audit basis;
   they reference the user id, not personal content).
 - Target SLA for requests: 30 days; process both via the support playbook.
+
+## Statement ingestion
+
+Catalog sync creates missing stubs. Official CF HTML is fetched by a relay
+(`scripts/relay_statement_ingest.py` or a self-hosted Actions runner) because
+Railway/GitHub-hosted runners are Cloudflare-blocked, then upserted via
+`POST /api/v1/admin/statements/ingest-html` into the existing classifier path.
+
+Cadence: Railway enqueues missing IDs hourly; run the relay hourly on an allowed network.
+
