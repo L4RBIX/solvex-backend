@@ -413,9 +413,14 @@ def _empty_world() -> dict[str, Any]:
             JOIN problem_skill_map m ON m.problem_id = p.problem_key
             """
         ).fetchall()
+    display_ready = store.list_display_ready_problem_ids(
+        [dict(row)["problem_key"] for row in rows]
+    )
     by_skill: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         item = dict(row)
+        if item["problem_key"] not in display_ready:
+            continue
         by_skill.setdefault(item["skill_id"], []).append(item)
     return {
         "handle": None,
@@ -461,7 +466,8 @@ def _active_pack_problem_ids(conn: sqlite3.Connection) -> set[str]:
             and duels._pack_has_complete_content(pack)
         ):
             usable.add(problem_id)
-    return usable
+    # Continuations open Solo Arena via /api/v1/problems/{id}; require display-ready.
+    return store.list_display_ready_problem_ids(list(usable))
 
 
 def _problem_skills(conn: sqlite3.Connection, problem_id: str) -> list[str]:

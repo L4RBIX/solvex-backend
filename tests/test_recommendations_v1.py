@@ -72,6 +72,9 @@ def build_world(submissions, extra_catalog, user_rating=1500):
     for p in extra_catalog:
         problems[f"{p['contestId']}{p['index']}"] = p
     store.save_problemset_snapshot({"problems": list(problems.values()), "problemStatistics": []})
+    from _statement_fixtures import seed_display_ready_statements
+
+    seed_display_ready_statements()
     taxonomy.build_problem_skill_map()
     episodes.rebuild_episodes(HANDLE)
     weakness.analyze_handle_weakness(HANDLE)

@@ -176,6 +176,8 @@ def owner_practice_constraints(
             and duels._pack_has_complete_content(pack)
         )
     }
+    # Practice items open Solo Arena via public problem content — require display-ready.
+    judgeable = store.list_display_ready_problem_ids(list(judgeable))
     return completed, judgeable
 
 
@@ -200,6 +202,12 @@ def _load_world(
             " WHERE m.taxonomy_version = ?",
             (TAXONOMY_VERSION,),
         ).fetchall()]
+    # Solo Arena CTAs require display-ready imported statements — never emit
+    # catalog-only IDs (e.g. 2228B) into queues or recommendations.
+    display_ready = store.list_display_ready_problem_ids(
+        [row["problem_key"] for row in candidates]
+    )
+    candidates = [row for row in candidates if row["problem_key"] in display_ready]
     practice_constraints = owner_practice_constraints(canonical, requesting_user_id)
     if practice_constraints is not None:
         completed, judgeable = practice_constraints

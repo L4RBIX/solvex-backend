@@ -1480,6 +1480,135 @@ def get_problem_statement(problem_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def is_problem_statement_display_ready(problem_id: str) -> bool:
+    """True when Arena can show a verified imported statement for ``problem_id``."""
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT display_ready, statement
+            FROM problem_statements
+            WHERE problem_id = ?
+            """,
+            (problem_id,),
+        ).fetchone()
+    if row is None:
+        return False
+    if not bool(row["display_ready"]):
+        return False
+    statement = row["statement"] or ""
+    return bool(str(statement).strip())
+
+
+def list_display_ready_problem_ids(problem_ids: list[str] | None = None) -> set[str]:
+    """Return the subset of IDs (or all catalog statements) that are display-ready."""
+    with connect() as conn:
+        if problem_ids is None:
+            rows = conn.execute(
+                """
+                SELECT problem_id FROM problem_statements
+                WHERE display_ready = 1
+                  AND statement IS NOT NULL
+                  AND TRIM(statement) != ''
+                """
+            ).fetchall()
+            return {row["problem_id"] for row in rows}
+        ready: set[str] = set()
+        chunk = 400
+        for offset in range(0, len(problem_ids), chunk):
+            batch = [pid for pid in problem_ids[offset : offset + chunk] if pid]
+            if not batch:
+                continue
+            placeholders = ",".join("?" for _ in batch)
+            rows = conn.execute(
+                f"""
+                SELECT problem_id FROM problem_statements
+                WHERE problem_id IN ({placeholders})
+                  AND display_ready = 1
+                  AND statement IS NOT NULL
+                  AND TRIM(statement) != ''
+                """,
+                batch,
+            ).fetchall()
+            ready.update(row["problem_id"] for row in rows)
+        return ready
+
+
+def arena_catalog_coverage_stats() -> dict[str, Any]:
+    """Counts for scripts/audit_arena_catalog_coverage.py and ops diagnostics."""
+    with connect() as conn:
+        total_problems = conn.execute("SELECT COUNT(*) FROM problems").fetchone()[0]
+        statement_rows = conn.execute("SELECT COUNT(*) FROM problem_statements").fetchone()[0]
+        display_ready = conn.execute(
+            """
+            SELECT COUNT(*) FROM problem_statements
+            WHERE display_ready = 1 AND statement IS NOT NULL AND TRIM(statement) != ''
+            """
+        ).fetchone()[0]
+        solve_ready = conn.execute(
+            "SELECT COUNT(*) FROM problem_statements WHERE solve_ready = 1"
+        ).fetchone()[0]
+        by_status = {
+            row["availability_status"]: row["c"]
+            for row in conn.execute(
+                """
+                SELECT availability_status, COUNT(*) AS c
+                FROM problem_statements
+                GROUP BY availability_status
+                """
+            ).fetchall()
+        }
+        missing_content = conn.execute(
+            """
+            SELECT COUNT(*) FROM problems p
+            LEFT JOIN problem_statements s ON s.problem_id = p.problem_key
+            WHERE s.problem_id IS NULL
+               OR s.display_ready = 0
+               OR s.statement IS NULL
+               OR TRIM(s.statement) = ''
+            """
+        ).fetchone()[0]
+        sample_missing = [
+            row["problem_key"]
+            for row in conn.execute(
+                """
+                SELECT p.problem_key FROM problems p
+                LEFT JOIN problem_statements s ON s.problem_id = p.problem_key
+                WHERE s.problem_id IS NULL
+                   OR s.display_ready = 0
+                   OR s.statement IS NULL
+                   OR TRIM(s.statement) = ''
+                ORDER BY p.contest_id DESC, p.problem_index
+                LIMIT 40
+                """
+            ).fetchall()
+        ]
+        probe_2228b = conn.execute(
+            """
+            SELECT p.problem_key AS in_catalog,
+                   s.problem_id AS statement_row,
+                   s.availability_status,
+                   s.display_ready,
+                   CASE
+                     WHEN s.statement IS NOT NULL AND TRIM(s.statement) != '' THEN 1
+                     ELSE 0
+                   END AS has_statement_text
+            FROM problems p
+            LEFT JOIN problem_statements s ON s.problem_id = p.problem_key
+            WHERE p.problem_key = '2228B'
+            """
+        ).fetchone()
+    return {
+        "total_canonical_problems": int(total_problems),
+        "with_statement_row": int(statement_rows),
+        "display_ready": int(display_ready),
+        "solve_ready": int(solve_ready),
+        "missing_or_not_display_ready": int(missing_content),
+        "availability_status_counts": by_status,
+        "sample_missing_ids": sample_missing,
+        "probe_2228B": dict(probe_2228b) if probe_2228b else None,
+    }
+
+
 # ─── Sync jobs ───────────────────────────────────────────────────────────────
 
 

@@ -53,6 +53,9 @@ def client():
 @pytest.fixture
 def world():
     store.save_problemset_snapshot({"problems": list(PROBLEMS), "problemStatistics": []})
+    from _statement_fixtures import seed_display_ready_statements
+
+    seed_display_ready_statements()
     taxonomy.build_problem_skill_map()
     for problem in PROBLEMS[:-1]:
         problem_id = f"{problem['contestId']}{problem['index']}"

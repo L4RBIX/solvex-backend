@@ -370,9 +370,25 @@ def _fixture_submissions():
     return subs
 
 
+def _assume_catalog_problems_are_display_ready(monkeypatch):
+    """Legacy fixture DBs often have catalog rows without statement imports.
+
+    Arena eligibility now requires display_ready statements; for contract tests
+    that are not about statement coverage, treat catalog membership as enough.
+    """
+    from contestiq_api.cfdata import store
+
+    monkeypatch.setattr(
+        store,
+        "is_problem_statement_display_ready",
+        lambda problem_id: store.get_problem(problem_id) is not None,
+    )
+
+
 def test_legacy_compat_shape_matches_frontend_contract(tmp_path, monkeypatch):
     from contestiq_api.legacy_compat import legacy_analysis
 
+    _assume_catalog_problems_are_display_ready(monkeypatch)
     result = legacy_analysis(_fixture_user(), _fixture_submissions())
     assert set(result) == {
         "handle",
@@ -410,6 +426,7 @@ def test_legacy_compat_shape_matches_frontend_contract(tmp_path, monkeypatch):
 def test_legacy_compat_finds_dp_friction(tmp_path, monkeypatch):
     from contestiq_api.legacy_compat import legacy_analysis
 
+    _assume_catalog_problems_are_display_ready(monkeypatch)
     result = legacy_analysis(_fixture_user(), _fixture_submissions())
     tags = [area["tag"] for area in result["frictionAreas"]]
     assert "dp" in tags
@@ -435,6 +452,7 @@ def test_compat_route_serves_legacy_shape(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     import contestiq_api.routes.v1 as v1
 
+    _assume_catalog_problems_are_display_ready(monkeypatch)
     monkeypatch.setattr(v1, "fetch_user_info", lambda handle, **kwargs: _fixture_user())
     monkeypatch.setattr(v1, "fetch_user_status", lambda handle, count=None, **kwargs: _fixture_submissions())
     monkeypatch.setattr(v1, "fetch_user_rating", lambda handle, **kwargs: [])
@@ -455,6 +473,7 @@ def test_compat_retry_queue_is_filtered_only_for_verified_owner(tmp_path, monkey
     from contestiq_api import auth, handles
     from contestiq_api.cfdata import store
 
+    _assume_catalog_problems_are_display_ready(monkeypatch)
     monkeypatch.setattr(v1, "fetch_user_info", lambda handle, **kwargs: _fixture_user())
     monkeypatch.setattr(v1, "fetch_user_status", lambda handle, count=None, **kwargs: _fixture_submissions())
     monkeypatch.setattr(v1, "fetch_user_rating", lambda handle, **kwargs: [])
@@ -473,6 +492,9 @@ def test_compat_retry_queue_is_filtered_only_for_verified_owner(tmp_path, monkey
             "problemStatistics": [],
         }
     )
+    from _statement_fixtures import seed_display_ready_statements
+
+    seed_display_ready_statements(["3A"])
     tests = json.dumps([{"input": "1\n", "expected_output": "1\n"}])
     with store.connect() as conn:
         conn.execute(

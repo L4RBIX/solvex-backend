@@ -259,7 +259,7 @@ def _classify(catalog_row: dict[str, Any], content: dict[str, Any] | None) -> di
             "availability_status": "missing",
             "display_ready": False,
             "solve_ready": False,
-            "unavailable_reason": "no content record for this problem_id",
+            "unavailable_reason": "Statement not available in SolveX yet.",
             "source_dataset": None,
             "source_urls": [],
             "statement_relation": None,
