@@ -114,6 +114,53 @@ def list_claims_for_user(user_id: str) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def get_active_claim(user_id: str) -> dict[str, Any] | None:
+    """Return the caller's newest unexpired pending claim, including the code.
+
+    The verification token is intentionally public (the user must paste it into
+    Codeforces Settings). History listing still omits codes; only the live
+    pending claim is restored so a remounted UI can continue the same attempt.
+    """
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE handle_claims SET status = ?, verification_code = ?"
+            " WHERE user_id = ? AND status = ? AND expires_at <= ?",
+            (STATUS_EXPIRED, _CLEARED_CODE, user_id, STATUS_PENDING, _now_dt().isoformat()),
+        )
+        row = conn.execute(
+            "SELECT * FROM handle_claims"
+            " WHERE user_id = ? AND status = ? AND expires_at > ?"
+            " ORDER BY created_at DESC LIMIT 1",
+            (user_id, STATUS_PENDING, _now_dt().isoformat()),
+        ).fetchone()
+    if row is None:
+        return None
+    claim = dict(row)
+    code = claim.get("verification_code") or ""
+    if not code:
+        return None
+    return claim
+
+
+def active_claim_response(claim: dict[str, Any]) -> dict[str, Any]:
+    code = claim["verification_code"]
+    return {
+        "active": True,
+        "already_verified": False,
+        "claim_id": claim["claim_id"],
+        "handle": claim["handle"],
+        "status": claim["status"],
+        "verification_code": code,
+        "verification_field": VERIFICATION_FIELD,
+        "created_at": claim["created_at"],
+        "expires_at": claim["expires_at"],
+        "instructions": (
+            f"On Codeforces, go to Settings and set your 'Organization' field to exactly '{code}', "
+            "save, then call verify before this code expires. You can change it back afterwards."
+        ),
+    }
+
+
 def start_claim(user_id: str, handle: str) -> dict[str, Any]:
     """Begin ownership verification for `handle`. Returns a fresh code every
     call (superseding any still-pending claim for the same user+handle) so a
@@ -136,10 +183,12 @@ def start_claim(user_id: str, handle: str) -> dict[str, Any]:
     now = _now_dt()
     expires = now + dt.timedelta(minutes=CLAIM_TTL_MINUTES)
     with store.connect() as conn:
+        # One active pending claim per account. Superseding every pending row
+        # (not only the same handle) keeps GET /handles/claim/active unambiguous.
         conn.execute(
             "UPDATE handle_claims SET status = ?, verification_code = ?"
-            " WHERE user_id = ? AND handle = ? AND status = ?",
-            (STATUS_SUPERSEDED, _CLEARED_CODE, user_id, canonical, STATUS_PENDING),
+            " WHERE user_id = ? AND status = ?",
+            (STATUS_SUPERSEDED, _CLEARED_CODE, user_id, STATUS_PENDING),
         )
         conn.execute(
             "INSERT INTO handle_claims (claim_id, user_id, handle, verification_code, status, created_at, expires_at)"
