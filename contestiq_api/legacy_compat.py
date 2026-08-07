@@ -13,6 +13,10 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from contestiq_api.arena_eligibility import (
+    filter_arena_capable_items,
+    select_arena_recommendations,
+)
 from contestiq_api.profile_history import (
     build_codeforces_history,
     build_public_profile,
@@ -350,10 +354,21 @@ def legacy_analysis(
             )
 
     candidates.sort(key=lambda c: abs(c["rating"] - comfort_sweet))
-    recommended_problems = candidates[:8]
+    # Never emit Div1/Div2 mirror IDs (651C, 1246B, …) that 404 in Arena —
+    # remap onto problemset catalog keys and keep filling until we have 8.
+    recommended_problems = select_arena_recommendations(
+        candidates,
+        limit=8,
+        contests=contests,
+    )
 
     seven_day_queue: list[dict[str, Any]] = []
     queue_tags = [a["tag"] for a in top_friction[:3]]
+    arena_candidates = recommended_problems or select_arena_recommendations(
+        candidates,
+        limit=16,
+        contests=contests,
+    )
     for day in range(1, 8):
         if day == 7:
             seven_day_queue.append(
@@ -367,7 +382,7 @@ def legacy_analysis(
             )
             continue
         if day == 6:
-            prob = candidates[5] if len(candidates) > 5 else None
+            prob = arena_candidates[5] if len(arena_candidates) > 5 else None
             seven_day_queue.append(
                 {
                     "day": 6,
@@ -377,6 +392,8 @@ def legacy_analysis(
                         {
                             "contestId": prob["contestId"],
                             "index": prob["index"],
+                            "arenaAvailable": True,
+                            "problemKey": prob.get("problemKey"),
                         }
                         if prob and prob.get("contestId") and prob.get("index")
                         else {}
@@ -389,7 +406,7 @@ def legacy_analysis(
             continue
 
         tag = queue_tags[(day - 1) % max(len(queue_tags), 1)] if queue_tags else "implementation"
-        prob = candidates[day - 1] if len(candidates) > day - 1 else None
+        prob = arena_candidates[day - 1] if len(arena_candidates) > day - 1 else None
         area = next((a for a in top_friction if a["tag"] == tag), None)
         seven_day_queue.append(
             {
@@ -400,6 +417,8 @@ def legacy_analysis(
                     {
                         "contestId": prob["contestId"],
                         "index": prob["index"],
+                        "arenaAvailable": True,
+                        "problemKey": prob.get("problemKey"),
                     }
                     if prob and prob.get("contestId") and prob.get("index")
                     else {}
@@ -409,6 +428,12 @@ def legacy_analysis(
                 "tagColor": _tag_color(tag),
             }
         )
+
+    seven_day_queue = filter_arena_capable_items(
+        seven_day_queue,
+        contests=contests,
+        keep_focus_only=True,
+    )
 
     handle = user.get("handle", "")
     history = build_codeforces_history(user, submissions, rating_history, contests=contests)
@@ -452,6 +477,8 @@ def legacy_analysis(
             "mostActiveDay": history["summary"].get("mostActiveDay"),
             "mostActiveWeekday": history["summary"].get("mostActiveWeekday"),
             "ratingProgress": history["summary"].get("ratingProgress"),
+            "solvedCountBasis": history["summary"].get("solvedCountBasis"),
+            "solvedCountLimitation": history["summary"].get("solvedCountLimitation"),
         },
         "diagnosis": diagnosis,
         "frictionAreas": top_friction,
