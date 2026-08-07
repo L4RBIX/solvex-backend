@@ -187,3 +187,18 @@ def fetch_problemset_problems(*, use_cache: bool = True, max_age_seconds: int | 
         use_cache=use_cache,
         max_age_seconds=max_age_seconds,
     )
+
+
+def fetch_contest_list(
+    *,
+    gym: bool = False,
+    use_cache: bool = True,
+    max_age_seconds: int | None = None,
+) -> list[dict[str, Any]]:
+    """Regular or gym contest metadata (start times used for mirror merging)."""
+    return _request(
+        "contest.list",
+        {"gym": "true" if gym else "false"},
+        use_cache=use_cache,
+        max_age_seconds=max_age_seconds,
+    )

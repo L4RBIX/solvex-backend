@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from contestiq_api.legacy_compat import legacy_analysis
 from contestiq_api.profile_history import (
@@ -167,7 +167,7 @@ def test_activity_aggregation_by_utc_day():
 
 def test_yearly_monthly_counters_and_streaks():
     now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
-    # first-AC days: today, yesterday, and 40 days ago
+    # first-AC / submission days: today, yesterday, and 40 days ago
     t_today = int(datetime(2026, 8, 7, 1, tzinfo=timezone.utc).timestamp())
     t_yest = int(datetime(2026, 8, 6, 1, tzinfo=timezone.utc).timestamp())
     t_old = int(datetime(2026, 6, 28, 1, tzinfo=timezone.utc).timestamp())
@@ -181,13 +181,68 @@ def test_yearly_monthly_counters_and_streaks():
     summary = build_activity_summary(subs, now=now)
     assert summary["solvedAllTime"] == 4
     assert summary["solvedLastMonth"] == 2  # today + yesterday
-    assert summary["solvedLastYear"] == 3  # excludes ancient
+    assert summary["solvedLastYear"] == 3  # excludes ancient (364d window)
     assert summary["currentStreakDays"] == 2
     assert summary["longestStreakDays"] >= 2
     assert summary["longestStreakThisYear"] >= 2
     assert summary["longestStreakThisMonth"] == 2
     assert summary["mostActiveMonth"] is not None
-    assert summary["timezone"] == "UTC"
+    assert summary["timezone"] == "Europe/Moscow"
+    assert summary["solvedWindowDays"]["lastYear"] == 364
+    assert summary["streakMetric"] == "any_submission_moscow"
+
+
+def test_last_year_uses_364_day_window_not_365():
+    """CF profile 'last year' is 52 weeks (364d); a solve at 364.5d is excluded."""
+    now = datetime(2026, 8, 7, 16, 0, tzinfo=timezone.utc)
+    t_inside = int((now - timedelta(days=363)).timestamp())
+    t_outside = int((now - timedelta(days=365)).timestamp())
+    subs = [
+        _sub(1, 1, "A", "OK", ts=t_inside, name="Inside"),
+        _sub(2, 1, "B", "OK", ts=t_outside, name="Outside"),
+    ]
+    summary = build_activity_summary(subs, now=now)
+    assert summary["solvedAllTime"] == 2
+    assert summary["solvedLastYear"] == 1
+
+
+def test_mirror_contests_same_start_collapse_duplicate_solves():
+    """Div1/Div2 (or Technocup) mirrors with identical start times count once."""
+    contests = [
+        {"id": 100, "startTimeSeconds": 1_700_000_000, "name": "Round X (Div. 1)"},
+        {"id": 101, "startTimeSeconds": 1_700_000_000, "name": "Round X (Div. 2)"},
+        {"id": 200, "startTimeSeconds": 1_800_000_000, "name": "Unrelated"},
+    ]
+    subs = [
+        _sub(1, 100, "A", "OK", ts=10, name="Same Problem", rating=1600),
+        _sub(2, 101, "C", "OK", ts=20, name="Same Problem", rating=1600),
+        _sub(3, 200, "A", "OK", ts=30, name="Other", rating=800),
+        # Same name inside one contest must NOT collapse (E1/E2 style).
+        _sub(4, 200, "E1", "OK", ts=40, name="Checksum", rating=None),
+        _sub(5, 200, "E2", "OK", ts=50, name="Checksum", rating=None),
+    ]
+    assert len(unique_accepted_problem_ids(subs)) == 5
+    assert len(unique_accepted_problem_ids(subs, contests)) == 4
+    summary = build_activity_summary(subs, contests=contests)
+    assert summary["solvedAllTime"] == 4
+
+
+def test_streaks_use_moscow_any_submission_days():
+    """A WA-only day still extends the CF-style streak; timezone is Moscow."""
+    # 2026-01-01 22:00 UTC = 2026-01-02 01:00 MSK
+    t_msk_jan2 = int(datetime(2026, 1, 1, 22, 0, tzinfo=timezone.utc).timestamp())
+    t_msk_jan3 = int(datetime(2026, 1, 2, 22, 0, tzinfo=timezone.utc).timestamp())
+    t_msk_jan4_wa = int(datetime(2026, 1, 3, 22, 0, tzinfo=timezone.utc).timestamp())
+    now = datetime(2026, 1, 4, 12, 0, tzinfo=timezone.utc)
+    subs = [
+        _sub(1, 1, "A", "OK", ts=t_msk_jan2),
+        _sub(2, 1, "B", "OK", ts=t_msk_jan3),
+        _sub(3, 1, "C", "WRONG_ANSWER", ts=t_msk_jan4_wa),
+    ]
+    summary = build_activity_summary(subs, now=now)
+    assert summary["longestStreakDays"] == 3
+    assert summary["solvedAllTime"] == 2
+
 
 
 def test_public_profile_maps_avatar_and_metadata():

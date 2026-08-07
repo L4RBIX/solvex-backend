@@ -1,17 +1,34 @@
 """Codeforces profile history aggregates for the public analysis page.
 
-Builds rating-change series and per-day activity from already-fetched
-Codeforces payloads. All-time solved counts every unique problem identity with
-at least one OK verdict — independent of catalog / recommendation eligibility.
+Counting rules are reverse-engineered to match the official profile
+``_UserActivityFrame`` counters as closely as the public API allows:
+
+* **Solved** = unique accepted problems, with Div1/Div2/Technocup *mirror*
+  contests (identical ``startTimeSeconds``) collapsed when the user has an OK
+  on the same problem name+rating in more than one of those contests.
+* **Last year / last month** solved windows are rolling **364** and **30**
+  days (CF’s “last year” is 52 weeks, not 365 days).
+* **Streaks** use Moscow time (UTC+3) and count calendar days with *any*
+  submission (any verdict), matching CF’s “in a row” counters.
+
+All-time solved still cannot always equal the website for every handle: the
+public ``user.status`` feed is incomplete for some users (observed undercounts
+for Benq / Dan1c). When the API is complete, tourist matches exactly and
+jiangly is within +1 after mirror merging.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Hashable
 
 V_AC = "OK"
+
+# Official profile “last year” is 52 weeks, not a 365-day civil year.
+LAST_YEAR_DAYS = 364
+LAST_MONTH_DAYS = 30
+MOSCOW = timezone(timedelta(hours=3))
 
 
 def problem_identity(sub: dict[str, Any]) -> str:
@@ -33,30 +50,133 @@ def problem_identity(sub: dict[str, Any]) -> str:
     return f"{problemset}:{index or 'x'}:{name}"
 
 
-def unique_accepted_problem_ids(submissions: list[dict[str, Any]]) -> set[str]:
-    return {
-        problem_identity(sub)
-        for sub in submissions
-        if sub.get("verdict") == V_AC
-    }
+def _problem_tuple(sub: dict[str, Any]) -> tuple[Any, ...]:
+    problem = sub.get("problem") or {}
+    contest_id = problem.get("contestId")
+    if contest_id is None:
+        contest_id = sub.get("contestId")
+    index = problem.get("index")
+    if contest_id is not None and index:
+        return ("cid", contest_id, index)
+    problemset = problem.get("problemsetName") or "problemset"
+    name = problem.get("name") or "unknown"
+    return ("ps", problemset, index or "x", name)
+
+
+def _contest_start_index(
+    contests: list[dict[str, Any]] | None,
+) -> dict[int, list[int]]:
+    """Map startTimeSeconds → contest ids that share that exact start."""
+    by_start: dict[int, list[int]] = defaultdict(list)
+    for row in contests or []:
+        try:
+            cid = int(row["id"])
+            start = int(row["startTimeSeconds"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        by_start[start].append(cid)
+    return {start: ids for start, ids in by_start.items() if len(ids) >= 2}
+
+
+def _mirror_parent_map(
+    submissions: list[dict[str, Any]],
+    contests: list[dict[str, Any]] | None,
+) -> dict[tuple[Any, ...], tuple[Any, ...]]:
+    """Union-find parents for OK problems that are contest mirrors of each other.
+
+    Two solves merge when:
+    - their contests share an identical startTimeSeconds, and
+    - normalized name + rating match, and
+    - the contest ids differ (never merge E1/E2 inside one contest).
+    """
+    parent: dict[tuple[Any, ...], tuple[Any, ...]] = {}
+
+    def find(x: tuple[Any, ...]) -> tuple[Any, ...]:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: tuple[Any, ...], b: tuple[Any, ...]) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    # Earliest OK row per raw identity (for name/rating).
+    first: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for sub in sorted(
+        (s for s in submissions if s.get("verdict") == V_AC),
+        key=lambda s: int(s.get("creationTimeSeconds") or 0),
+    ):
+        key = _problem_tuple(sub)
+        if key not in first:
+            first[key] = sub
+
+    by_start = _contest_start_index(contests)
+    if not by_start:
+        return {k: k for k in first}
+
+    for ids in by_start.values():
+        idset = set(ids)
+        by_nr: dict[tuple[str, Any], list[tuple[Any, ...]]] = defaultdict(list)
+        for key, sub in first.items():
+            if key[0] != "cid" or key[1] not in idset:
+                continue
+            problem = sub.get("problem") or {}
+            name = (problem.get("name") or "").strip().lower()
+            if not name:
+                continue
+            by_nr[(name, problem.get("rating"))].append(key)
+        for keys in by_nr.values():
+            by_contest: dict[Any, list[tuple[Any, ...]]] = defaultdict(list)
+            for key in keys:
+                by_contest[key[1]].append(key)
+            if len(by_contest) < 2:
+                continue
+            reps = [rows[0] for rows in by_contest.values()]
+            base = reps[0]
+            for other in reps[1:]:
+                union(base, other)
+
+    return {k: find(k) for k in first}
+
+
+def unique_accepted_problem_ids(
+    submissions: list[dict[str, Any]],
+    contests: list[dict[str, Any]] | None = None,
+) -> set[str]:
+    first = first_accepted_timestamps(submissions, contests)
+    return set(first)
 
 
 def _utc_day(ts: int) -> str:
     return datetime.fromtimestamp(int(ts), tz=timezone.utc).date().isoformat()
 
 
-def first_accepted_timestamps(submissions: list[dict[str, Any]]) -> dict[str, int]:
-    """Earliest OK creationTimeSeconds per problem identity."""
-    first: dict[str, int] = {}
+def _moscow_day(ts: int) -> date:
+    return datetime.fromtimestamp(int(ts), tz=MOSCOW).date()
+
+
+def first_accepted_timestamps(
+    submissions: list[dict[str, Any]],
+    contests: list[dict[str, Any]] | None = None,
+) -> dict[str, int]:
+    """Earliest OK creationTimeSeconds per canonical (mirror-merged) identity."""
+    parents = _mirror_parent_map(submissions, contests)
+    first: dict[Hashable, int] = {}
+    display: dict[Hashable, str] = {}
     for sub in sorted(
         (s for s in submissions if s.get("verdict") == V_AC),
         key=lambda s: int(s.get("creationTimeSeconds") or 0),
     ):
-        key = problem_identity(sub)
+        raw = _problem_tuple(sub)
+        root = parents.get(raw, raw)
         ts = int(sub.get("creationTimeSeconds") or 0)
-        if key not in first:
-            first[key] = ts
-    return first
+        if root not in first:
+            first[root] = ts
+            display[root] = problem_identity(sub)
+    return {display[root]: ts for root, ts in first.items()}
 
 
 def build_rating_history(rating_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -130,10 +250,10 @@ def _longest_run(active_days: set[date]) -> int:
 
 
 def _streaks(active_days: set[date], today: date) -> tuple[int, int]:
-    """Return (current_streak, longest_streak) over UTC days with ≥1 first-AC.
+    """Return (current_streak, longest_streak).
 
     current_streak counts contiguous active days ending today or yesterday
-    (so a quiet UTC today does not instantly zero an overnight streak).
+    (so a quiet local today does not instantly zero an overnight streak).
     """
     if not active_days:
         return 0, 0
@@ -147,12 +267,25 @@ def _streaks(active_days: set[date], today: date) -> tuple[int, int]:
     return current, longest
 
 
+def submission_active_days_moscow(submissions: list[dict[str, Any]]) -> set[date]:
+    """Moscow calendar days with at least one submission (any verdict)."""
+    days: set[date] = set()
+    for sub in submissions:
+        ts = sub.get("creationTimeSeconds")
+        if ts is None:
+            continue
+        days.add(_moscow_day(int(ts)))
+    return days
+
+
 def _month_key(d: date) -> str:
     return f"{d.year:04d}-{d.month:02d}"
 
 
 def _weekday_name(d: date) -> str:
-    return ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")[d.weekday()]
+    return ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")[
+        d.weekday()
+    ]
 
 
 def build_solving_stats(
@@ -160,11 +293,13 @@ def build_solving_stats(
     rating_rows: list[dict[str, Any]] | None = None,
     *,
     now: datetime | None = None,
+    contests: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Richer solving metrics derived only from available CF payloads."""
+    """Richer solving metrics aligned with Codeforces profile counters."""
     now_utc = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
-    today = now_utc.date()
-    first = first_accepted_timestamps(submissions)
+    now_msk = now_utc.astimezone(MOSCOW)
+    today_msk = now_msk.date()
+    first = first_accepted_timestamps(submissions, contests)
 
     # Per-problem attempt counts before first AC (chronological within each identity).
     by_problem: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -200,7 +335,7 @@ def build_solving_stats(
         round(sum(attempts_before_ac) / len(attempts_before_ac), 2) if attempts_before_ac else None
     )
 
-    # Activity peaks by first-AC day.
+    # Activity peaks by first-AC day (UTC — heatmap / “most active” helpers).
     first_by_day: dict[date, int] = defaultdict(int)
     first_by_month: dict[str, int] = defaultdict(int)
     first_by_weekday: dict[str, int] = defaultdict(int)
@@ -225,12 +360,6 @@ def build_solving_stats(
         weekday, count = max(first_by_weekday.items(), key=lambda kv: (kv[1], kv[0]))
         most_active_weekday = {"weekday": weekday, "uniqueSolved": count}
 
-    year_start = date(today.year, 1, 1)
-    month_start = date(today.year, today.month, 1)
-    active_days = set(first_by_day)
-    year_days = {d for d in active_days if d >= year_start}
-    month_days = {d for d in active_days if d >= month_start}
-
     rating_history = build_rating_history(rating_rows or [])
     rating_progress = None
     if rating_history:
@@ -241,9 +370,13 @@ def build_solving_stats(
             "contests": len(rating_history),
         }
 
-    year_cut = int((now_utc - timedelta(days=365)).timestamp())
-    month_cut = int((now_utc - timedelta(days=30)).timestamp())
-    current_streak, longest_streak = _streaks(active_days, today)
+    year_cut = int((now_utc - timedelta(days=LAST_YEAR_DAYS)).timestamp())
+    month_cut = int((now_utc - timedelta(days=LAST_MONTH_DAYS)).timestamp())
+
+    active_days = submission_active_days_moscow(submissions)
+    year_days = {d for d in active_days if d >= today_msk - timedelta(days=LAST_YEAR_DAYS)}
+    month_days = {d for d in active_days if d >= today_msk - timedelta(days=LAST_MONTH_DAYS)}
+    current_streak, longest_streak = _streaks(active_days, today_msk)
 
     return {
         "solvedAllTime": len(first),
@@ -256,6 +389,7 @@ def build_solving_stats(
         "mostActiveWeekday": most_active_weekday,
         "currentStreakDays": current_streak,
         "longestStreakDays": longest_streak,
+        # CF labels these “for the last year/month” (rolling), not calendar YTD.
         "longestStreakThisYear": _longest_run(year_days),
         "longestStreakThisMonth": _longest_run(month_days),
         "ratingProgress": rating_progress,
@@ -267,16 +401,19 @@ def build_activity_summary(
     rating_rows: list[dict[str, Any]] | None = None,
     *,
     now: datetime | None = None,
+    contests: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     now_utc = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
-    solving = build_solving_stats(submissions, rating_rows, now=now_utc)
+    solving = build_solving_stats(submissions, rating_rows, now=now_utc, contests=contests)
     ok_count = sum(1 for s in submissions if s.get("verdict") == V_AC)
     return {
         **solving,
         "submissionsAllTime": len(submissions),
         "acceptedSubmissions": ok_count,
         "activityMetric": "unique_first_accepted",
-        "timezone": "UTC",
+        "streakMetric": "any_submission_moscow",
+        "solvedWindowDays": {"lastYear": LAST_YEAR_DAYS, "lastMonth": LAST_MONTH_DAYS},
+        "timezone": "Europe/Moscow",
     }
 
 
@@ -284,10 +421,11 @@ def build_codeforces_history(
     user: dict[str, Any],
     submissions: list[dict[str, Any]],
     rating_rows: list[dict[str, Any]] | None = None,
+    contests: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     rating_history = build_rating_history(rating_rows or [])
     activity = build_activity(submissions)
-    summary = build_activity_summary(submissions, rating_rows)
+    summary = build_activity_summary(submissions, rating_rows, contests=contests)
     current_rating = user.get("rating")
     max_rating = user.get("maxRating")
     return {
