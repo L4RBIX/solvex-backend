@@ -1813,8 +1813,7 @@ def list_non_display_ready_problem_ids() -> list[str]:
             FROM problem_statements
             WHERE display_ready = 0
                OR statement IS NULL
-               OR TRIM(statement) = ''
-               OR availability_status IN ('missing', 'partial')
+               OR TRIM(COALESCE(statement, '')) = ''
             """
         ).fetchall()
     return [row["problem_id"] for row in rows]
