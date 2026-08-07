@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import logging
 from typing import Any
 
@@ -33,6 +34,10 @@ _STATUS_MAP: dict[int, str] = {
 }
 
 
+class Judge0ResultError(RuntimeError):
+    """Provider returned a malformed or inconsistent execution payload."""
+
+
 def _normalized_status(status_id: int, description: str = "") -> str:
     if "memory limit" in description.casefold():
         return "memory_limit"
@@ -52,18 +57,26 @@ def _b64enc(s: str) -> str:
 
 
 def _b64dec(s: object) -> str:
-    if not s:
+    if s is None or s is False:
+        return ""
+    if not isinstance(s, str):
+        raise Judge0ResultError("stdout/stderr/compile_output must be base64 strings")
+    if s == "":
         return ""
     try:
-        return base64.b64decode(s).decode("utf-8", errors="replace")
-    except Exception:
-        return str(s)
+        return base64.b64decode(s, validate=False).decode("utf-8", errors="replace")
+    except Exception as exc:
+        raise Judge0ResultError("failed to decode base64 execution field") from exc
 
 
 def _outputs_match(actual: str, expected: str) -> bool:
     def lines(s: str) -> list[str]:
         return [ln.rstrip() for ln in s.replace("\r\n", "\n").rstrip("\n").split("\n")]
     return lines(actual) == lines(expected)
+
+
+def _token_sha(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 async def run_submission(
@@ -75,9 +88,15 @@ async def run_submission(
     source_code: str,
     stdin: str,
     expected_output: str | None = None,
+    execution_id: str | None = None,
+    source_sha256: str | None = None,
+    stdin_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Submit code to Judge0, poll until final, return normalised result."""
-    headers: dict[str, str] = {"Content-Type": "application/json"}
+    headers: dict[str, str] = {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+    }
     if api_key:
         headers["X-RapidAPI-Key"] = api_key
     if api_host:
@@ -96,8 +115,24 @@ async def run_submission(
             headers=headers,
         )
         r.raise_for_status()
-        token: str = r.json()["token"]
-        logger.info("judge0 token=%s lang_id=%d", token, language_id)
+        try:
+            created = r.json()
+        except Exception as exc:
+            raise Judge0ResultError("create submission returned non-JSON") from exc
+        token = created.get("token")
+        if not isinstance(token, str) or not token.strip():
+            raise Judge0ResultError("create submission missing token")
+        token = token.strip()
+        token_hash = _token_sha(token)
+        logger.info(
+            "judge0_submit execution_id=%s token_sha256=%s lang_id=%d "
+            "source_sha256=%s stdin_sha256=%s",
+            execution_id,
+            token_hash,
+            language_id,
+            source_sha256,
+            stdin_sha256,
+        )
 
         final: dict[str, Any] | None = None
         for _ in range(_MAX_POLLS):
@@ -107,8 +142,20 @@ async def run_submission(
                 headers=headers,
             )
             r.raise_for_status()
-            data: dict[str, Any] = r.json()
-            status_id: int = (data.get("status") or {}).get("id", 0)
+            try:
+                data: dict[str, Any] = r.json()
+            except Exception as exc:
+                raise Judge0ResultError("poll returned non-JSON") from exc
+            raw_status = data.get("status")
+            if not isinstance(raw_status, dict):
+                raise Judge0ResultError("poll missing status object")
+            status_id = raw_status.get("id")
+            if not isinstance(status_id, int):
+                raise Judge0ResultError("poll status.id is not an int")
+            # Guard against token mix-ups if the provider echoes a token field.
+            echoed = data.get("token")
+            if isinstance(echoed, str) and echoed.strip() and echoed.strip() != token:
+                raise Judge0ResultError("poll token mismatch")
             if status_id not in _IN_PROGRESS_IDS:
                 final = data
                 break
@@ -124,6 +171,7 @@ async def run_submission(
             "memory_kb": None,
             "passed": False,
             "message": "Execution timed out waiting for Judge0.",
+            "provider_token_sha256": token_hash,
         }
 
     stdout = _b64dec(final.get("stdout"))
@@ -131,7 +179,11 @@ async def run_submission(
     compile_output = _b64dec(final.get("compile_output"))
     message = _norm(final.get("message"))
     raw_status = final.get("status") or {}
+    if not isinstance(raw_status, dict):
+        raise Judge0ResultError("final status object missing")
     status_id = raw_status.get("id", 13)
+    if not isinstance(status_id, int):
+        raise Judge0ResultError("final status.id is not an int")
     solvex_status = _normalized_status(
         status_id,
         _norm(raw_status.get("description")),
@@ -152,6 +204,13 @@ async def run_submission(
         except (ValueError, TypeError):
             pass
 
+    memory_kb = final.get("memory")
+    if memory_kb is not None and not isinstance(memory_kb, int):
+        try:
+            memory_kb = int(memory_kb)
+        except (TypeError, ValueError) as exc:
+            raise Judge0ResultError("memory field is not an int") from exc
+
     return {
         "status": solvex_status,
         "status_id": status_id,
@@ -159,7 +218,8 @@ async def run_submission(
         "stderr": stderr,
         "compile_output": compile_output,
         "time_ms": time_ms,
-        "memory_kb": final.get("memory"),
+        "memory_kb": memory_kb,
         "passed": solvex_status == "accepted",
         "message": message,
+        "provider_token_sha256": token_hash,
     }
