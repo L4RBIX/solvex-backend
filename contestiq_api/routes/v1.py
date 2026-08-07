@@ -24,6 +24,7 @@ from contestiq_api.settings import get_settings
 from contestiq_api.versions import ANALYSIS_VERSION, PROBLEM_CATALOG_VERSION, TAXONOMY_VERSION
 from contestiq_core.codeforces.client import (
     CodeforcesAPIError,
+    fetch_contest_list,
     fetch_user_info,
     fetch_user_rating,
     fetch_user_status,
@@ -190,6 +191,12 @@ def compat_legacy_analysis(handle: str, request: Request):
         except CodeforcesAPIError:
             # Unrated / empty rating history is normal; keep analysis available.
             rating_history = []
+        try:
+            # Regular + gym start times — used only to collapse Div1/Div2 mirrors.
+            contests = list(fetch_contest_list(gym=False, max_age_seconds=24 * 60 * 60) or [])
+            contests.extend(fetch_contest_list(gym=True, max_age_seconds=24 * 60 * 60) or [])
+        except CodeforcesAPIError:
+            contests = []
     except CodeforcesAPIError as exc:
         message = str(exc)
         lowered = message.lower()
@@ -203,7 +210,7 @@ def compat_legacy_analysis(handle: str, request: Request):
             raise APIError("CODEFORCES_HANDLE_NOT_FOUND", f"Codeforces handle was not found: {cleaned}", 404) from exc
         raise APIError("CODEFORCES_UNAVAILABLE", "Codeforces API is temporarily unavailable. Try again later.", 502) from exc
 
-    result = legacy_analysis(user, submissions, rating_history)
+    result = legacy_analysis(user, submissions, rating_history, contests=contests)
     constraints = planner.owner_practice_constraints(
         cleaned,
         caller["user_id"] if caller else None,

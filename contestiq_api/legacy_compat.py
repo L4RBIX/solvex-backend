@@ -159,6 +159,7 @@ def legacy_analysis(
     user: dict[str, Any],
     submissions: list[dict[str, Any]],
     rating_history: list[dict[str, Any]] | None = None,
+    contests: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compute the legacy AnalysisResult shape from raw Codeforces API payloads."""
     problem_map = _build_problem_map(submissions)
@@ -410,7 +411,7 @@ def legacy_analysis(
         )
 
     handle = user.get("handle", "")
-    history = build_codeforces_history(user, submissions, rating_history)
+    history = build_codeforces_history(user, submissions, rating_history, contests=contests)
     # Keep summary.uniqueSolved aligned with the explicit all-time metric so
     # header / cards / heatmap summaries cannot diverge.
     unique_solved = int(history["summary"]["solvedAllTime"])

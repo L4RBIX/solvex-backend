@@ -19,6 +19,8 @@ CODEFORCES_CACHE_TTL_SECONDS: dict[str, int] = {
     "user.rating": 15 * 60,
     "user.info": 15 * 60,
     "problemset.problems": 24 * 60 * 60,
+    # Contest start times feed Div1/Div2/Technocup mirror merging for solved counts.
+    "contest.list": 24 * 60 * 60,
 }
 DEFAULT_CODEFORCES_CACHE_TTL_SECONDS = 15 * 60
 
