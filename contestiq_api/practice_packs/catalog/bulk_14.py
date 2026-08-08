@@ -233,27 +233,29 @@ def a_1633a(stdin: str) -> str:
 
 
 def s_1914a(stdin: str) -> str:
+    from collections import Counter
+
+    ls = lines(stdin)
     out = []
-    for s in lines(stdin)[1:]:
-        solved = set(s)
-        ans = "N"
-        for ch in "ABCDEFGHIJKLM":
-            if ch not in solved:
-                ans = ch
-                break
-        out.append(ans)
+    i = 1
+    for _ in range(int(ls[0])):
+        n = int(ls[i])
+        s = ls[i + 1]
+        i += 2
+        cnt = Counter(s[:n])
+        out.append(str(sum(cnt[chr(65 + k)] >= k + 1 for k in range(26))))
     return "\n".join(out) + "\n"
 
 
 def a_1914a(stdin: str) -> str:
+    ls = lines(stdin)
     out = []
-    for s in lines(stdin)[1:]:
-        for ch in "ABCDEFGHIJKLM":
-            if ch not in s:
-                out.append(ch)
-                break
-        else:
-            out.append("N")
+    i = 1
+    for _ in range(int(ls[0])):
+        n = int(ls[i])
+        s = ls[i + 1]
+        i += 2
+        out.append(str(sum(s.count(chr(65 + k)) >= k + 1 for k in range(26))))
     return "\n".join(out) + "\n"
 
 
@@ -1510,7 +1512,23 @@ def _gen_1633a(rng: random.Random) -> list[str]:
     return ['3\n1\n2\n3\n', '1\n1\n', '1\n2\n', '1\n3\n', '1\n4\n', '1\n5\n', '1\n6\n', '1\n7\n', '1\n8\n', '3\n3\n2\n3\n', '3\n1\n5\n3\n']
 
 def _gen_1914a(rng: random.Random) -> list[str]:
-    return ['3\nABCDEFGHIJKL\nACEGIKMO\nACEG\n', '1\nA\n', '1\nAB\n', '1\nABC\n', '1\nABCD\n', '1\nABCDE\n', '1\n\n', '5\nABCDEFGHIJKL\nACEGIKMO\nACEG\n', '6\nABCDEFGHIJKL\nACEGIKMO\nACEG\n', '7\nABCDEFGHIJKL\nACEGIKMO\nACEG\n', '8\nABCDEFGHIJKL\nACEGIKMO\nACEG\n']
+    return [
+        "3\n6\nACBCBC\n7\nAAAAFPC\n22\nFEADBBDFFEDFFFDHHHADCC\n",
+        "1\n4\nABBC\n",
+        "1\n7\nAAAAAAA\n",
+        "1\n6\nABABAB\n",
+        "1\n1\nA\n",
+        "1\n3\nABC\n",
+        "1\n5\nAAAAA\n",
+        "1\n8\nAABBCCDD\n",
+        "1\n2\nBA\n",
+        "1\n10\nABCDEFGHIJ\n",
+        "1\n6\nACBCBC\n",
+    ]
+
+
+# keep sample in reg() in sync with official CF sample
+
 
 def _gen_2051a(rng: random.Random) -> list[str]:
     return ['3\n5 3 2\n6 2 3\n8 4 2\n', '1\n5 3 2\n', '1\n6 2 3\n', '1\n8 4 2\n', '1\n10 5 1\n', '1\n1 1 1\n', '3\n7 3 2\n6 2 3\n8 4 2\n', '6\n5 3 2\n6 2 3\n8 4 2\n', '3\n5 3 6\n6 2 3\n8 4 2\n', '3\n5 3 2\n11 2 3\n8 4 2\n', '3\n5 3 3\n6 2 3\n8 4 2\n']
@@ -1680,7 +1698,7 @@ def _build():
     reg('1968A', 'Always YES maximize.', '3\n1\n2\n3\n', s_1968a, a_1968a, {'m1': lambda s: 'YES\n', 'm2': lambda s: 'NO\n'}, _gen_1968a, family='constructive', checker='tokens_ci')
     reg('2137A', 'Collatz reaches 1.', '3\n1\n2\n3\n', s_2137a, a_2137a, {'m1': lambda s: 'YES\n', 'm2': lambda s: 'NO\n'}, _gen_2137a, family='math', checker='tokens_ci')
     reg('1633A', 'Divisible by 7 without digit 7.', '3\n1\n2\n3\n', s_1633a, a_1633a, {'m1': lambda s: 'YES\n', 'm2': lambda s: 'NO\n'}, _gen_1633a, family='math', checker='tokens_ci')
-    reg('1914A', 'First unsolved problem letter.', '3\nABCDEFGHIJKL\nACEGIKMO\nACEG\n', s_1914a, a_1914a, {'m1': lambda s: '0\n', 'm2': lambda s: '1\n'}, _gen_1914a, family='implementation', checker='exact')
+    reg('1914A', 'Problemsolving Log: count problems with enough minutes logged.', '3\n6\nACBCBC\n7\nAAAAFPC\n22\nFEADBBDFFEDFFFDHHHADCC\n', s_1914a, a_1914a, {'m1': lambda s: '0\n', 'm2': lambda s: '1\n'}, _gen_1914a, family='implementation', checker='exact')
     reg('2051A', 'Min cost for triple-wall rooms.', '3\n5 3 2\n6 2 3\n8 4 2\n', s_2051a, a_2051a, {'m1': lambda s: '0\n', 'm2': lambda s: '1\n'}, _gen_2051a, family='math', checker='exact')
     reg('2008B', 'String equals two halves.', '3\naaba\naa\nab\n', s_2008b, a_2008b, {'m1': lambda s: 'YES\n', 'm2': lambda s: 'NO\n'}, _gen_2008b, family='strings', checker='tokens_ci')
     reg('1976A', 'Valid password check.', '5\nAb1\nabc\nAbC\n12345678\naA1aaaaa\n', s_1976a, a_1976a, {'m1': lambda s: 'YES\n', 'm2': lambda s: 'NO\n'}, _gen_1976a, family='strings', checker='tokens_ci')
