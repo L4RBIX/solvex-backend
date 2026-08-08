@@ -626,9 +626,8 @@ def practice_pack_activate_oracles(admin: dict[str, Any] = Depends(auth.require_
     pack_pipeline._auto_packs_seeded = False
     result = pack_pipeline.activate_oracle_packs()
     auth.audit(
-        admin["user_id"],
+        admin["actor"],
         "practice_packs.activate_oracles",
-        "practice_pack",
         None,
         {
             "activated": result["activated"],
@@ -649,9 +648,8 @@ def practice_pack_enqueue_batch(
 
     result = enqueue_registry_candidates(limit=limit)
     auth.audit(
-        admin["user_id"],
+        admin["actor"],
         "practice_packs.enqueue_batch",
-        "practice_pack",
         None,
         {"enqueued": result.get("enqueued"), "candidates": result.get("candidates")},
     )
@@ -665,11 +663,11 @@ def practice_pack_run_batch(
 ):
     from contestiq_api.practice_packs.batch import run_batch
 
-    result = run_batch(limit=limit, worker_id=f"admin-{admin['user_id'][:8]}")
+    worker = str(admin.get("user_id") or admin.get("actor") or "admin")[:8]
+    result = run_batch(limit=limit, worker_id=f"admin-{worker}")
     auth.audit(
-        admin["user_id"],
+        admin["actor"],
         "practice_packs.run_batch",
-        "practice_pack",
         None,
         {
             "claimed": result.get("claimed"),
