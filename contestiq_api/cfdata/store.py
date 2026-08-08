@@ -1097,6 +1097,76 @@ CREATE TABLE IF NOT EXISTS statement_relay_heartbeats (
     jobs_blocked INTEGER NOT NULL DEFAULT 0,
     note TEXT
 );
+
+CREATE TABLE IF NOT EXISTS cf_contests (
+    contest_id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT,
+    phase TEXT NOT NULL,
+    frozen INTEGER NOT NULL DEFAULT 0,
+    duration_seconds INTEGER,
+    start_time INTEGER,
+    relative_time_seconds INTEGER,
+    prepared_by TEXT,
+    website_url TEXT,
+    description TEXT,
+    difficulty INTEGER,
+    kind TEXT,
+    icpc_region TEXT,
+    country TEXT,
+    city TEXT,
+    season TEXT,
+    is_gym INTEGER NOT NULL DEFAULT 0,
+    finished_at TEXT,
+    pipeline_status TEXT NOT NULL DEFAULT 'idle',
+    pipeline_started_at TEXT,
+    pipeline_completed_at TEXT,
+    pipeline_error TEXT,
+    discovered_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    raw_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cf_contests_phase_start ON cf_contests (phase, start_time DESC);
+CREATE INDEX IF NOT EXISTS idx_cf_contests_pipeline ON cf_contests (pipeline_status, updated_at);
+
+CREATE TABLE IF NOT EXISTS problem_lifecycle (
+    problem_id TEXT PRIMARY KEY,
+    contest_id INTEGER,
+    stage TEXT NOT NULL DEFAULT 'DISCOVERED',
+    support_class TEXT,
+    discovered_at TEXT,
+    catalog_imported_at TEXT,
+    statement_imported_at TEXT,
+    arena_ready_at TEXT,
+    local_test_ready_at TEXT,
+    pack_generation_at TEXT,
+    submit_ready_at TEXT,
+    fully_indexed_at TEXT,
+    unsupported_reason TEXT,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_problem_lifecycle_contest ON problem_lifecycle (contest_id, stage);
+CREATE INDEX IF NOT EXISTS idx_problem_lifecycle_stage ON problem_lifecycle (stage, updated_at);
+
+CREATE TABLE IF NOT EXISTS problem_similar (
+    problem_id TEXT NOT NULL,
+    similar_problem_id TEXT NOT NULL,
+    score REAL NOT NULL,
+    reasons TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (problem_id, similar_problem_id)
+);
+CREATE INDEX IF NOT EXISTS idx_problem_similar_score ON problem_similar (problem_id, score DESC);
+
+CREATE TABLE IF NOT EXISTS contest_pipeline_events (
+    event_id TEXT PRIMARY KEY,
+    contest_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_contest_pipeline_events_contest
+    ON contest_pipeline_events (contest_id, created_at DESC);
 """
 
 

@@ -167,6 +167,8 @@ class Settings:
     statement_relay_lease_seconds: int = 600
     # When true, the API process also runs an embedded relay worker loop.
     statement_relay_embedded: bool = True
+    # Zero-day contest watcher poll interval (seconds). 0 disables.
+    contest_watcher_interval_seconds: float = 120.0
     # Billing (Phase 06): default provider name for checkout
     billing_provider: str = "manual"
     billing_api_key: str = ""
@@ -267,6 +269,9 @@ def get_settings() -> Settings:
         statement_relay_token=(os.getenv("STATEMENT_RELAY_TOKEN") or "").strip(),
         statement_relay_lease_seconds=_parse_int(os.getenv("STATEMENT_RELAY_LEASE_SECONDS"), 600),
         statement_relay_embedded=_parse_bool(os.getenv("STATEMENT_RELAY_EMBEDDED"), True),
+        contest_watcher_interval_seconds=_parse_float(
+            os.getenv("CONTEST_WATCHER_INTERVAL_SECONDS"), 120.0
+        ),
         billing_provider=os.getenv("BILLING_PROVIDER") or "manual",
         billing_api_key=os.getenv("BILLING_API_KEY") or "",
         billing_webhook_secret=os.getenv("BILLING_WEBHOOK_SECRET") or "",
