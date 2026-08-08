@@ -127,7 +127,8 @@ def _normalize_judge_tests(value: Any) -> list[dict[str, str]]:
             return []
         stdin = item.get("input")
         expected = item.get("expected_output")
-        if not isinstance(stdin, str) or not isinstance(expected, str) or not expected.strip():
+        # Empty expected is valid for some CF tasks (e.g. 118A all-vowels → blank line).
+        if not isinstance(stdin, str) or not isinstance(expected, str):
             return []
         if len(stdin.encode("utf-8")) > MAX_DUEL_TEST_BYTES or len(expected.encode("utf-8")) > MAX_DUEL_TEST_BYTES:
             return []
