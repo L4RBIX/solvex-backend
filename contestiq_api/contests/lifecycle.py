@@ -157,7 +157,7 @@ def refresh_problem_lifecycle(problem_id: str) -> dict[str, Any]:
     if (
         stage in {"SUBMIT_READY", "LOCAL_TEST_READY", "ARENA_READY", "PACK_GENERATION"}
         and skill is not None
-        and int((similar or {}).get("c") or 0) >= 3
+        and int((similar["c"] if similar is not None else 0) or 0) >= 3
     ):
         if stage == "SUBMIT_READY" or stage == "PACK_GENERATION":
             # Fully indexed requires submit-ready OR explicit unsupported skip with arena.
