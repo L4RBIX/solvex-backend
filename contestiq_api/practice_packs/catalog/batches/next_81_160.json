@@ -1,0 +1,985 @@
+[
+  {
+    "problem_id": "1992A",
+    "contest_id": 1992,
+    "index": "A",
+    "name": "Only Pluses",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "constructive algorithms",
+      "greedy",
+      "math",
+      "sortings"
+    ],
+    "solved_count": 50139
+  },
+  {
+    "problem_id": "233A",
+    "contest_id": 233,
+    "index": "A",
+    "name": "Perfect Permutation",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 50078
+  },
+  {
+    "problem_id": "1462A",
+    "contest_id": 1462,
+    "index": "A",
+    "name": "Favorite Sequence",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "two pointers"
+    ],
+    "solved_count": 50053
+  },
+  {
+    "problem_id": "1831A",
+    "contest_id": 1831,
+    "index": "A",
+    "name": "Twin Permutations",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms"
+    ],
+    "solved_count": 50030
+  },
+  {
+    "problem_id": "2148A",
+    "contest_id": 2148,
+    "index": "A",
+    "name": "Sublime Sequence",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "hashing",
+      "math"
+    ],
+    "solved_count": 49836
+  },
+  {
+    "problem_id": "1834A",
+    "contest_id": 1834,
+    "index": "A",
+    "name": "Unit Array",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 49766
+  },
+  {
+    "problem_id": "1296A",
+    "contest_id": 1296,
+    "index": "A",
+    "name": "Array with Odd Sum",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 49243
+  },
+  {
+    "problem_id": "459B",
+    "contest_id": 459,
+    "index": "B",
+    "name": "Pashmak and Flowers",
+    "rating": 1300,
+    "tags": [
+      "combinatorics",
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 48668
+  },
+  {
+    "problem_id": "1294C",
+    "contest_id": 1294,
+    "index": "C",
+    "name": "Product of Three Numbers",
+    "rating": 1300,
+    "tags": [
+      "greedy",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 48637
+  },
+  {
+    "problem_id": "1559A",
+    "contest_id": 1559,
+    "index": "A",
+    "name": "Mocha and Math",
+    "rating": 900,
+    "tags": [
+      "bitmasks",
+      "constructive algorithms",
+      "math"
+    ],
+    "solved_count": 48573
+  },
+  {
+    "problem_id": "1855B",
+    "contest_id": 1855,
+    "index": "B",
+    "name": "Longest Divisors Interval",
+    "rating": 900,
+    "tags": [
+      "brute force",
+      "combinatorics",
+      "greedy",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 48567
+  },
+  {
+    "problem_id": "1941A",
+    "contest_id": 1941,
+    "index": "A",
+    "name": "Rudolf and the Ticket",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "math"
+    ],
+    "solved_count": 48261
+  },
+  {
+    "problem_id": "1980A",
+    "contest_id": 1980,
+    "index": "A",
+    "name": "Problem Generator",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 48225
+  },
+  {
+    "problem_id": "1777A",
+    "contest_id": 1777,
+    "index": "A",
+    "name": "Everybody Likes Good Arrays!",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 47902
+  },
+  {
+    "problem_id": "1849B",
+    "contest_id": 1849,
+    "index": "B",
+    "name": "Monsters",
+    "rating": 1000,
+    "tags": [
+      "greedy",
+      "math",
+      "sortings"
+    ],
+    "solved_count": 47881
+  },
+  {
+    "problem_id": "935A",
+    "contest_id": 935,
+    "index": "A",
+    "name": "Fafa and his Company",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "implementation"
+    ],
+    "solved_count": 47868
+  },
+  {
+    "problem_id": "1744C",
+    "contest_id": 1744,
+    "index": "C",
+    "name": "Traffic Light",
+    "rating": 1000,
+    "tags": [
+      "binary search",
+      "implementation",
+      "two pointers"
+    ],
+    "solved_count": 47567
+  },
+  {
+    "problem_id": "1950C",
+    "contest_id": 1950,
+    "index": "C",
+    "name": "Clock Conversion",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 47564
+  },
+  {
+    "problem_id": "556A",
+    "contest_id": 556,
+    "index": "A",
+    "name": "Case of the Zeros and Ones",
+    "rating": 900,
+    "tags": [
+      "greedy"
+    ],
+    "solved_count": 47442
+  },
+  {
+    "problem_id": "1399B",
+    "contest_id": 1399,
+    "index": "B",
+    "name": "Gifts Fixing",
+    "rating": 800,
+    "tags": [
+      "greedy"
+    ],
+    "solved_count": 47411
+  },
+  {
+    "problem_id": "1342A",
+    "contest_id": 1342,
+    "index": "A",
+    "name": "Road To Zero",
+    "rating": 1000,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 47196
+  },
+  {
+    "problem_id": "1368A",
+    "contest_id": 1368,
+    "index": "A",
+    "name": "C+=",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "greedy",
+      "implementation",
+      "math"
+    ],
+    "solved_count": 47189
+  },
+  {
+    "problem_id": "1325A",
+    "contest_id": 1325,
+    "index": "A",
+    "name": "EhAb AnD gCd",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "greedy",
+      "number theory"
+    ],
+    "solved_count": 47188
+  },
+  {
+    "problem_id": "1859B",
+    "contest_id": 1859,
+    "index": "B",
+    "name": "Olya and Game with Arrays",
+    "rating": 1000,
+    "tags": [
+      "constructive algorithms",
+      "greedy",
+      "math",
+      "sortings"
+    ],
+    "solved_count": 47149
+  },
+  {
+    "problem_id": "149A",
+    "contest_id": 149,
+    "index": "A",
+    "name": "Business trip",
+    "rating": 900,
+    "tags": [
+      "greedy",
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 47086
+  },
+  {
+    "problem_id": "1873E",
+    "contest_id": 1873,
+    "index": "E",
+    "name": "Building an Aquarium",
+    "rating": 1100,
+    "tags": [
+      "binary search",
+      "sortings"
+    ],
+    "solved_count": 46942
+  },
+  {
+    "problem_id": "1327A",
+    "contest_id": 1327,
+    "index": "A",
+    "name": "Sum of Odd Integers",
+    "rating": 1100,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 46805
+  },
+  {
+    "problem_id": "1311A",
+    "contest_id": 1311,
+    "index": "A",
+    "name": "Add Odd or Subtract Even",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation",
+      "math"
+    ],
+    "solved_count": 46744
+  },
+  {
+    "problem_id": "1675B",
+    "contest_id": 1675,
+    "index": "B",
+    "name": "Make It Increasing",
+    "rating": 900,
+    "tags": [
+      "greedy",
+      "implementation"
+    ],
+    "solved_count": 46509
+  },
+  {
+    "problem_id": "2014A",
+    "contest_id": 2014,
+    "index": "A",
+    "name": "Robin Helps",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation"
+    ],
+    "solved_count": 46500
+  },
+  {
+    "problem_id": "1729A",
+    "contest_id": 1729,
+    "index": "A",
+    "name": "Two Elevators",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 46494
+  },
+  {
+    "problem_id": "450A",
+    "contest_id": 450,
+    "index": "A",
+    "name": "Jzzhu and Children",
+    "rating": 1000,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 46451
+  },
+  {
+    "problem_id": "1352B",
+    "contest_id": 1352,
+    "index": "B",
+    "name": "Same Parity Summands",
+    "rating": 1200,
+    "tags": [
+      "constructive algorithms",
+      "math"
+    ],
+    "solved_count": 46402
+  },
+  {
+    "problem_id": "320A",
+    "contest_id": 320,
+    "index": "A",
+    "name": "Magic Numbers",
+    "rating": 900,
+    "tags": [
+      "brute force",
+      "greedy"
+    ],
+    "solved_count": 46274
+  },
+  {
+    "problem_id": "2044C",
+    "contest_id": 2044,
+    "index": "C",
+    "name": "Hard Problem",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 46254
+  },
+  {
+    "problem_id": "577A",
+    "contest_id": 577,
+    "index": "A",
+    "name": "Multiplication Table",
+    "rating": 1000,
+    "tags": [
+      "implementation",
+      "number theory"
+    ],
+    "solved_count": 46247
+  },
+  {
+    "problem_id": "1472A",
+    "contest_id": 1472,
+    "index": "A",
+    "name": "Cards for Friends",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 46114
+  },
+  {
+    "problem_id": "2185A",
+    "contest_id": 2185,
+    "index": "A",
+    "name": "Perfect Root",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "math"
+    ],
+    "solved_count": 45980
+  },
+  {
+    "problem_id": "1476A",
+    "contest_id": 1476,
+    "index": "A",
+    "name": "K-divisible Sum",
+    "rating": 1000,
+    "tags": [
+      "binary search",
+      "constructive algorithms",
+      "greedy",
+      "math"
+    ],
+    "solved_count": 45779
+  },
+  {
+    "problem_id": "1805A",
+    "contest_id": 1805,
+    "index": "A",
+    "name": "We Need the Zero",
+    "rating": 800,
+    "tags": [
+      "bitmasks",
+      "brute force"
+    ],
+    "solved_count": 45703
+  },
+  {
+    "problem_id": "499B",
+    "contest_id": 499,
+    "index": "B",
+    "name": "Lecture",
+    "rating": 1000,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 45651
+  },
+  {
+    "problem_id": "1971B",
+    "contest_id": 1971,
+    "index": "B",
+    "name": "Different String",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 45556
+  },
+  {
+    "problem_id": "2132A",
+    "contest_id": 2132,
+    "index": "A",
+    "name": "Homework",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 45200
+  },
+  {
+    "problem_id": "115A",
+    "contest_id": 115,
+    "index": "A",
+    "name": "Party",
+    "rating": 900,
+    "tags": [
+      "dfs and similar",
+      "graphs",
+      "trees"
+    ],
+    "solved_count": 45200
+  },
+  {
+    "problem_id": "1343C",
+    "contest_id": 1343,
+    "index": "C",
+    "name": "Alternating Subsequence",
+    "rating": 1200,
+    "tags": [
+      "dp",
+      "greedy",
+      "two pointers"
+    ],
+    "solved_count": 45170
+  },
+  {
+    "problem_id": "977C",
+    "contest_id": 977,
+    "index": "C",
+    "name": "Less or Equal",
+    "rating": 1200,
+    "tags": [
+      "sortings"
+    ],
+    "solved_count": 45135
+  },
+  {
+    "problem_id": "1353A",
+    "contest_id": 1353,
+    "index": "A",
+    "name": "Most Unstable Array",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "greedy",
+      "math"
+    ],
+    "solved_count": 45061
+  },
+  {
+    "problem_id": "1360D",
+    "contest_id": 1360,
+    "index": "D",
+    "name": "Buying Shovels",
+    "rating": 1300,
+    "tags": [
+      "math",
+      "number theory"
+    ],
+    "solved_count": 45044
+  },
+  {
+    "problem_id": "124A",
+    "contest_id": 124,
+    "index": "A",
+    "name": "The number of positions",
+    "rating": 1000,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 44968
+  },
+  {
+    "problem_id": "2000A",
+    "contest_id": 2000,
+    "index": "A",
+    "name": "Primary Task",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "math",
+      "strings"
+    ],
+    "solved_count": 44862
+  },
+  {
+    "problem_id": "1950B",
+    "contest_id": 1950,
+    "index": "B",
+    "name": "Upscaling",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 44849
+  },
+  {
+    "problem_id": "26A",
+    "contest_id": 26,
+    "index": "A",
+    "name": "Almost Prime",
+    "rating": 900,
+    "tags": [
+      "number theory"
+    ],
+    "solved_count": 44821
+  },
+  {
+    "problem_id": "1537B",
+    "contest_id": 1537,
+    "index": "B",
+    "name": "Bad Boy",
+    "rating": 900,
+    "tags": [
+      "constructive algorithms",
+      "greedy",
+      "math"
+    ],
+    "solved_count": 44808
+  },
+  {
+    "problem_id": "1760C",
+    "contest_id": 1760,
+    "index": "C",
+    "name": "Advantage",
+    "rating": 800,
+    "tags": [
+      "data structures",
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 44796
+  },
+  {
+    "problem_id": "509A",
+    "contest_id": 509,
+    "index": "A",
+    "name": "Maximum in Table",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "implementation"
+    ],
+    "solved_count": 44743
+  },
+  {
+    "problem_id": "1857C",
+    "contest_id": 1857,
+    "index": "C",
+    "name": "Assembly via Minimums",
+    "rating": 1200,
+    "tags": [
+      "greedy",
+      "sortings"
+    ],
+    "solved_count": 44670
+  },
+  {
+    "problem_id": "1454A",
+    "contest_id": 1454,
+    "index": "A",
+    "name": "Special Permutation",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "probabilities"
+    ],
+    "solved_count": 44639
+  },
+  {
+    "problem_id": "1097A",
+    "contest_id": 1097,
+    "index": "A",
+    "name": "Gennady and a Card Game",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "implementation"
+    ],
+    "solved_count": 44634
+  },
+  {
+    "problem_id": "2193A",
+    "contest_id": 2193,
+    "index": "A",
+    "name": "DBMB and the Array",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "math"
+    ],
+    "solved_count": 44507
+  },
+  {
+    "problem_id": "519B",
+    "contest_id": 519,
+    "index": "B",
+    "name": "A and B and Compilation Errors",
+    "rating": 1100,
+    "tags": [
+      "data structures",
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 44346
+  },
+  {
+    "problem_id": "686A",
+    "contest_id": 686,
+    "index": "A",
+    "name": "Free Ice Cream",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "implementation"
+    ],
+    "solved_count": 44293
+  },
+  {
+    "problem_id": "2114A",
+    "contest_id": 2114,
+    "index": "A",
+    "name": "Square Year",
+    "rating": 800,
+    "tags": [
+      "binary search",
+      "brute force",
+      "math"
+    ],
+    "solved_count": 44284
+  },
+  {
+    "problem_id": "1904A",
+    "contest_id": 1904,
+    "index": "A",
+    "name": "Forked!",
+    "rating": 900,
+    "tags": [
+      "brute force",
+      "implementation"
+    ],
+    "solved_count": 44262
+  },
+  {
+    "problem_id": "1873D",
+    "contest_id": 1873,
+    "index": "D",
+    "name": "1D Eraser",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation",
+      "two pointers"
+    ],
+    "solved_count": 44202
+  },
+  {
+    "problem_id": "1385A",
+    "contest_id": 1385,
+    "index": "A",
+    "name": "Three Pairwise Maximums",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 44102
+  },
+  {
+    "problem_id": "214A",
+    "contest_id": 214,
+    "index": "A",
+    "name": "System of Equations",
+    "rating": 800,
+    "tags": [
+      "brute force"
+    ],
+    "solved_count": 43927
+  },
+  {
+    "problem_id": "1358A",
+    "contest_id": 1358,
+    "index": "A",
+    "name": "Park Lighting",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 43855
+  },
+  {
+    "problem_id": "467B",
+    "contest_id": 467,
+    "index": "B",
+    "name": "Fedor and New Game",
+    "rating": 1100,
+    "tags": [
+      "bitmasks",
+      "brute force",
+      "constructive algorithms",
+      "implementation"
+    ],
+    "solved_count": 43785
+  },
+  {
+    "problem_id": "1791E",
+    "contest_id": 1791,
+    "index": "E",
+    "name": "Negatives and Positives",
+    "rating": 1100,
+    "tags": [
+      "dp",
+      "greedy",
+      "sortings"
+    ],
+    "solved_count": 43697
+  },
+  {
+    "problem_id": "1872A",
+    "contest_id": 1872,
+    "index": "A",
+    "name": "Two Vessels",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "greedy",
+      "math"
+    ],
+    "solved_count": 43684
+  },
+  {
+    "problem_id": "1543A",
+    "contest_id": 1543,
+    "index": "A",
+    "name": "Exciting Bets",
+    "rating": 900,
+    "tags": [
+      "greedy",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 43583
+  },
+  {
+    "problem_id": "1337A",
+    "contest_id": 1337,
+    "index": "A",
+    "name": "Ichihime and Triangle",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "math"
+    ],
+    "solved_count": 43549
+  },
+  {
+    "problem_id": "265A",
+    "contest_id": 265,
+    "index": "A",
+    "name": "Colorful Stones (Simplified Edition)",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 43533
+  },
+  {
+    "problem_id": "1869A",
+    "contest_id": 1869,
+    "index": "A",
+    "name": "Make It Zero",
+    "rating": 900,
+    "tags": [
+      "constructive algorithms"
+    ],
+    "solved_count": 43482
+  },
+  {
+    "problem_id": "1348A",
+    "contest_id": 1348,
+    "index": "A",
+    "name": "Phoenix and Balance",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 43363
+  },
+  {
+    "problem_id": "1679A",
+    "contest_id": 1679,
+    "index": "A",
+    "name": "AvtoBus",
+    "rating": 900,
+    "tags": [
+      "brute force",
+      "greedy",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 43352
+  },
+  {
+    "problem_id": "1593B",
+    "contest_id": 1593,
+    "index": "B",
+    "name": "Make it Divisible by 25",
+    "rating": 900,
+    "tags": [
+      "dfs and similar",
+      "dp",
+      "greedy",
+      "math"
+    ],
+    "solved_count": 43345
+  },
+  {
+    "problem_id": "2185B",
+    "contest_id": 2185,
+    "index": "B",
+    "name": "Prefix Max",
+    "rating": 800,
+    "tags": [
+      "greedy"
+    ],
+    "solved_count": 43338
+  },
+  {
+    "problem_id": "1794B",
+    "contest_id": 1794,
+    "index": "B",
+    "name": "Not Dividing",
+    "rating": 900,
+    "tags": [
+      "constructive algorithms",
+      "greedy",
+      "math"
+    ],
+    "solved_count": 43308
+  },
+  {
+    "problem_id": "1335B",
+    "contest_id": 1335,
+    "index": "B",
+    "name": "Construct the String",
+    "rating": 900,
+    "tags": [
+      "constructive algorithms"
+    ],
+    "solved_count": 43119
+  }
+]

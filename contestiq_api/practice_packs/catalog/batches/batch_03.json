@@ -1,0 +1,606 @@
+[
+  {
+    "problem_id": "1535A",
+    "contest_id": 1535,
+    "index": "A",
+    "name": "Fair Playoff",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "implementation"
+    ],
+    "solved_count": 58150
+  },
+  {
+    "problem_id": "2094A",
+    "contest_id": 2094,
+    "index": "A",
+    "name": "Trippi Troppi",
+    "rating": 800,
+    "tags": [
+      "strings"
+    ],
+    "solved_count": 58040
+  },
+  {
+    "problem_id": "1360A",
+    "contest_id": 1360,
+    "index": "A",
+    "name": "Minimal Square",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 57897
+  },
+  {
+    "problem_id": "1985B",
+    "contest_id": 1985,
+    "index": "B",
+    "name": "Maximum Multiple Sum",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 57880
+  },
+  {
+    "problem_id": "1722B",
+    "contest_id": 1722,
+    "index": "B",
+    "name": "Colourblindness",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 57734
+  },
+  {
+    "problem_id": "1877A",
+    "contest_id": 1877,
+    "index": "A",
+    "name": "Goals of Victory",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 57500
+  },
+  {
+    "problem_id": "1788A",
+    "contest_id": 1788,
+    "index": "A",
+    "name": "One and Two",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "implementation",
+      "math"
+    ],
+    "solved_count": 57442
+  },
+  {
+    "problem_id": "1669B",
+    "contest_id": 1669,
+    "index": "B",
+    "name": "Triple",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 57261
+  },
+  {
+    "problem_id": "2065A",
+    "contest_id": 2065,
+    "index": "A",
+    "name": "Skibidus and Amog'u",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "constructive algorithms",
+      "greedy",
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 57034
+  },
+  {
+    "problem_id": "474A",
+    "contest_id": 474,
+    "index": "A",
+    "name": "Keyboard",
+    "rating": 900,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 56993
+  },
+  {
+    "problem_id": "702A",
+    "contest_id": 702,
+    "index": "A",
+    "name": "Maximum Increase",
+    "rating": 800,
+    "tags": [
+      "dp",
+      "greedy",
+      "implementation"
+    ],
+    "solved_count": 56847
+  },
+  {
+    "problem_id": "313B",
+    "contest_id": 313,
+    "index": "B",
+    "name": "Ilya and Queries",
+    "rating": 1100,
+    "tags": [
+      "dp",
+      "implementation"
+    ],
+    "solved_count": 56801
+  },
+  {
+    "problem_id": "707A",
+    "contest_id": 707,
+    "index": "A",
+    "name": "Brain's Photos",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 56701
+  },
+  {
+    "problem_id": "959A",
+    "contest_id": 959,
+    "index": "A",
+    "name": "Mahmoud and Ehab and the even-odd game",
+    "rating": 800,
+    "tags": [
+      "games",
+      "math"
+    ],
+    "solved_count": 56669
+  },
+  {
+    "problem_id": "433B",
+    "contest_id": 433,
+    "index": "B",
+    "name": "Kuriyama Mirai's Stones",
+    "rating": 1200,
+    "tags": [
+      "dp",
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 56637
+  },
+  {
+    "problem_id": "1866A",
+    "contest_id": 1866,
+    "index": "A",
+    "name": "Ambitious Kid",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 56531
+  },
+  {
+    "problem_id": "1624B",
+    "contest_id": 1624,
+    "index": "B",
+    "name": "Make AP",
+    "rating": 900,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 56060
+  },
+  {
+    "problem_id": "1426A",
+    "contest_id": 1426,
+    "index": "A",
+    "name": "Floor Number",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 55899
+  },
+  {
+    "problem_id": "1814A",
+    "contest_id": 1814,
+    "index": "A",
+    "name": "Coins",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 55868
+  },
+  {
+    "problem_id": "1373B",
+    "contest_id": 1373,
+    "index": "B",
+    "name": "01 Game",
+    "rating": 900,
+    "tags": [
+      "games"
+    ],
+    "solved_count": 55862
+  },
+  {
+    "problem_id": "1913B",
+    "contest_id": 1913,
+    "index": "B",
+    "name": "Swap and Delete",
+    "rating": 1000,
+    "tags": [
+      "strings"
+    ],
+    "solved_count": 55841
+  },
+  {
+    "problem_id": "1915C",
+    "contest_id": 1915,
+    "index": "C",
+    "name": "Can I Square?",
+    "rating": 800,
+    "tags": [
+      "binary search",
+      "implementation"
+    ],
+    "solved_count": 55805
+  },
+  {
+    "problem_id": "1850C",
+    "contest_id": 1850,
+    "index": "C",
+    "name": "Word on the Paper",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 54710
+  },
+  {
+    "problem_id": "1360B",
+    "contest_id": 1360,
+    "index": "B",
+    "name": "Honest Coach",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "sortings"
+    ],
+    "solved_count": 54608
+  },
+  {
+    "problem_id": "1294A",
+    "contest_id": 1294,
+    "index": "A",
+    "name": "Collecting Coins",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 54462
+  },
+  {
+    "problem_id": "2167B",
+    "contest_id": 2167,
+    "index": "B",
+    "name": "Your Name",
+    "rating": 800,
+    "tags": [
+      "sortings",
+      "strings"
+    ],
+    "solved_count": 54369
+  },
+  {
+    "problem_id": "2009B",
+    "contest_id": 2009,
+    "index": "B",
+    "name": "osu!mania",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "implementation"
+    ],
+    "solved_count": 54368
+  },
+  {
+    "problem_id": "1883C",
+    "contest_id": 1883,
+    "index": "C",
+    "name": "Raspberries",
+    "rating": 1000,
+    "tags": [
+      "dp",
+      "math"
+    ],
+    "solved_count": 54367
+  },
+  {
+    "problem_id": "1760B",
+    "contest_id": 1760,
+    "index": "B",
+    "name": "Atilla's Favorite Problem",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 54359
+  },
+  {
+    "problem_id": "451B",
+    "contest_id": 451,
+    "index": "B",
+    "name": "Sort the Array",
+    "rating": 1300,
+    "tags": [
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 54260
+  },
+  {
+    "problem_id": "379A",
+    "contest_id": 379,
+    "index": "A",
+    "name": "New Year Candles",
+    "rating": 1000,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 54233
+  },
+  {
+    "problem_id": "731A",
+    "contest_id": 731,
+    "index": "A",
+    "name": "Night at the Museum",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 54187
+  },
+  {
+    "problem_id": "1343A",
+    "contest_id": 1343,
+    "index": "A",
+    "name": "Candies",
+    "rating": 900,
+    "tags": [
+      "brute force",
+      "math"
+    ],
+    "solved_count": 54187
+  },
+  {
+    "problem_id": "1837B",
+    "contest_id": 1837,
+    "index": "B",
+    "name": "Comparison String",
+    "rating": 900,
+    "tags": [
+      "greedy"
+    ],
+    "solved_count": 54017
+  },
+  {
+    "problem_id": "1955A",
+    "contest_id": 1955,
+    "index": "A",
+    "name": "Yogurt Sale",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 53723
+  },
+  {
+    "problem_id": "584A",
+    "contest_id": 584,
+    "index": "A",
+    "name": "Olesya and Rodion",
+    "rating": 1000,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 53708
+  },
+  {
+    "problem_id": "742A",
+    "contest_id": 742,
+    "index": "A",
+    "name": "Arpa\u2019s hard exam and Mehrdad\u2019s naive cheat",
+    "rating": 1000,
+    "tags": [
+      "implementation",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 53509
+  },
+  {
+    "problem_id": "2126A",
+    "contest_id": 2126,
+    "index": "A",
+    "name": "Only One Digit",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "implementation",
+      "math"
+    ],
+    "solved_count": 53434
+  },
+  {
+    "problem_id": "2044B",
+    "contest_id": 2044,
+    "index": "B",
+    "name": "Normal Problem",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 53432
+  },
+  {
+    "problem_id": "1783A",
+    "contest_id": 1783,
+    "index": "A",
+    "name": "Make it Beautiful",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "math",
+      "sortings"
+    ],
+    "solved_count": 52908
+  },
+  {
+    "problem_id": "460A",
+    "contest_id": 460,
+    "index": "A",
+    "name": "Vasya and Socks",
+    "rating": 900,
+    "tags": [
+      "brute force",
+      "implementation",
+      "math"
+    ],
+    "solved_count": 52877
+  },
+  {
+    "problem_id": "1791D",
+    "contest_id": 1791,
+    "index": "D",
+    "name": "Distinct Split",
+    "rating": 1000,
+    "tags": [
+      "brute force",
+      "greedy",
+      "strings"
+    ],
+    "solved_count": 52867
+  },
+  {
+    "problem_id": "476A",
+    "contest_id": 476,
+    "index": "A",
+    "name": "Dreamoon and Stairs",
+    "rating": 1000,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 52770
+  },
+  {
+    "problem_id": "1542A",
+    "contest_id": 1542,
+    "index": "A",
+    "name": "Odd Set",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 52463
+  },
+  {
+    "problem_id": "1927A",
+    "contest_id": 1927,
+    "index": "A",
+    "name": "Make it White",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "strings"
+    ],
+    "solved_count": 52273
+  },
+  {
+    "problem_id": "1371A",
+    "contest_id": 1371,
+    "index": "A",
+    "name": "Magical Sticks",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 51955
+  },
+  {
+    "problem_id": "1845A",
+    "contest_id": 1845,
+    "index": "A",
+    "name": "Forbidden Integer",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "implementation",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 51642
+  },
+  {
+    "problem_id": "327A",
+    "contest_id": 327,
+    "index": "A",
+    "name": "Flipping Game",
+    "rating": 1200,
+    "tags": [
+      "brute force",
+      "dp",
+      "implementation"
+    ],
+    "solved_count": 51597
+  },
+  {
+    "problem_id": "1389A",
+    "contest_id": 1389,
+    "index": "A",
+    "name": "LCM Problem",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "greedy",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 51550
+  },
+  {
+    "problem_id": "1840C",
+    "contest_id": 1840,
+    "index": "C",
+    "name": "Ski Resort",
+    "rating": 1000,
+    "tags": [
+      "combinatorics",
+      "math",
+      "two pointers"
+    ],
+    "solved_count": 51409
+  }
+]
