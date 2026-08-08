@@ -634,6 +634,48 @@ def practice_pack_activate_oracles(admin: dict[str, Any] = Depends(auth.require_
             "activated": result["activated"],
             "failed_count": len(result["failed"]),
             "skipped": result["skipped"],
+            "review_required": result.get("review_required") or [],
+        },
+    )
+    return result
+
+
+@router.post("/practice-packs/enqueue-batch")
+def practice_pack_enqueue_batch(
+    limit: int = Query(default=50, ge=1, le=500),
+    admin: dict[str, Any] = Depends(auth.require_admin),
+):
+    from contestiq_api.practice_packs.batch import enqueue_registry_candidates
+
+    result = enqueue_registry_candidates(limit=limit)
+    auth.audit(
+        admin["user_id"],
+        "practice_packs.enqueue_batch",
+        "practice_pack",
+        None,
+        {"enqueued": result.get("enqueued"), "candidates": result.get("candidates")},
+    )
+    return result
+
+
+@router.post("/practice-packs/run-batch")
+def practice_pack_run_batch(
+    limit: int = Query(default=25, ge=1, le=100),
+    admin: dict[str, Any] = Depends(auth.require_admin),
+):
+    from contestiq_api.practice_packs.batch import run_batch
+
+    result = run_batch(limit=limit, worker_id=f"admin-{admin['user_id'][:8]}")
+    auth.audit(
+        admin["user_id"],
+        "practice_packs.run_batch",
+        "practice_pack",
+        None,
+        {
+            "claimed": result.get("claimed"),
+            "activated": result.get("activated"),
+            "review_required": result.get("review_required"),
+            "rejected": result.get("rejected"),
         },
     )
     return result

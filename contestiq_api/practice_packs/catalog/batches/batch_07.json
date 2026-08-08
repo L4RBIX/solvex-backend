@@ -1,0 +1,619 @@
+[
+  {
+    "problem_id": "1941C",
+    "contest_id": 1941,
+    "index": "C",
+    "name": "Rudolf and the Ugly String",
+    "rating": 900,
+    "tags": [
+      "dp",
+      "greedy",
+      "strings"
+    ],
+    "solved_count": 39878
+  },
+  {
+    "problem_id": "1335C",
+    "contest_id": 1335,
+    "index": "C",
+    "name": "Two Teams Composing",
+    "rating": 1100,
+    "tags": [
+      "binary search",
+      "greedy",
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 39800
+  },
+  {
+    "problem_id": "1977A",
+    "contest_id": 1977,
+    "index": "A",
+    "name": "Little Nikita",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 39772
+  },
+  {
+    "problem_id": "2131A",
+    "contest_id": 2131,
+    "index": "A",
+    "name": "Lever",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 39735
+  },
+  {
+    "problem_id": "1490C",
+    "contest_id": 1490,
+    "index": "C",
+    "name": "Sum of Cubes",
+    "rating": 1100,
+    "tags": [
+      "binary search",
+      "brute force",
+      "math"
+    ],
+    "solved_count": 39620
+  },
+  {
+    "problem_id": "2091A",
+    "contest_id": 2091,
+    "index": "A",
+    "name": "Olympiad Date",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "strings"
+    ],
+    "solved_count": 39549
+  },
+  {
+    "problem_id": "1660A",
+    "contest_id": 1660,
+    "index": "A",
+    "name": "Vasya and Coins",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 39544
+  },
+  {
+    "problem_id": "1692C",
+    "contest_id": 1692,
+    "index": "C",
+    "name": "Where's the Bishop?",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 39541
+  },
+  {
+    "problem_id": "1726A",
+    "contest_id": 1726,
+    "index": "A",
+    "name": "Mainak and Array",
+    "rating": 900,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 39500
+  },
+  {
+    "problem_id": "1696B",
+    "contest_id": 1696,
+    "index": "B",
+    "name": "NIT Destroys the Universe",
+    "rating": 900,
+    "tags": [
+      "greedy"
+    ],
+    "solved_count": 39366
+  },
+  {
+    "problem_id": "1353C",
+    "contest_id": 1353,
+    "index": "C",
+    "name": "Board Moves",
+    "rating": 1000,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 39221
+  },
+  {
+    "problem_id": "1560B",
+    "contest_id": 1560,
+    "index": "B",
+    "name": "Who's Opposite?",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 39220
+  },
+  {
+    "problem_id": "1325B",
+    "contest_id": 1325,
+    "index": "B",
+    "name": "CopyCopyCopyCopyCopy",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation"
+    ],
+    "solved_count": 39125
+  },
+  {
+    "problem_id": "1917B",
+    "contest_id": 1917,
+    "index": "B",
+    "name": "Erase First or Second Letter",
+    "rating": 1100,
+    "tags": [
+      "brute force",
+      "combinatorics",
+      "data structures",
+      "dp",
+      "strings"
+    ],
+    "solved_count": 39032
+  },
+  {
+    "problem_id": "1702A",
+    "contest_id": 1702,
+    "index": "A",
+    "name": "Round Down the Price",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms"
+    ],
+    "solved_count": 38905
+  },
+  {
+    "problem_id": "1980B",
+    "contest_id": 1980,
+    "index": "B",
+    "name": "Choosing Cubes",
+    "rating": 800,
+    "tags": [
+      "sortings"
+    ],
+    "solved_count": 38816
+  },
+  {
+    "problem_id": "2117A",
+    "contest_id": 2117,
+    "index": "A",
+    "name": "False Alarm",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation"
+    ],
+    "solved_count": 38781
+  },
+  {
+    "problem_id": "1840A",
+    "contest_id": 1840,
+    "index": "A",
+    "name": "Cipher Shifer",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings",
+      "two pointers"
+    ],
+    "solved_count": 38773
+  },
+  {
+    "problem_id": "1927B",
+    "contest_id": 1927,
+    "index": "B",
+    "name": "Following the String",
+    "rating": 900,
+    "tags": [
+      "constructive algorithms",
+      "greedy",
+      "strings"
+    ],
+    "solved_count": 38690
+  },
+  {
+    "problem_id": "709A",
+    "contest_id": 709,
+    "index": "A",
+    "name": "Juicer",
+    "rating": 900,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 38686
+  },
+  {
+    "problem_id": "2126B",
+    "contest_id": 2126,
+    "index": "B",
+    "name": "No Casino in the Mountains",
+    "rating": 800,
+    "tags": [
+      "dp",
+      "greedy"
+    ],
+    "solved_count": 38537
+  },
+  {
+    "problem_id": "1992B",
+    "contest_id": 1992,
+    "index": "B",
+    "name": "Angry Monk",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math",
+      "sortings"
+    ],
+    "solved_count": 38500
+  },
+  {
+    "problem_id": "1832B",
+    "contest_id": 1832,
+    "index": "B",
+    "name": "Maximum Sum",
+    "rating": 1100,
+    "tags": [
+      "brute force",
+      "sortings",
+      "two pointers"
+    ],
+    "solved_count": 38435
+  },
+  {
+    "problem_id": "2171A",
+    "contest_id": 2171,
+    "index": "A",
+    "name": "Shizuku Hoshikawa and Farm Legs",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "math"
+    ],
+    "solved_count": 38396
+  },
+  {
+    "problem_id": "139A",
+    "contest_id": 139,
+    "index": "A",
+    "name": "Petr and Book",
+    "rating": 1000,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 38395
+  },
+  {
+    "problem_id": "1876A",
+    "contest_id": 1876,
+    "index": "A",
+    "name": "Helmets in Night Light",
+    "rating": 1000,
+    "tags": [
+      "greedy",
+      "sortings"
+    ],
+    "solved_count": 38368
+  },
+  {
+    "problem_id": "1974A",
+    "contest_id": 1974,
+    "index": "A",
+    "name": "Phone Desktop",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 38342
+  },
+  {
+    "problem_id": "476B",
+    "contest_id": 476,
+    "index": "B",
+    "name": "Dreamoon and WiFi",
+    "rating": 1300,
+    "tags": [
+      "bitmasks",
+      "brute force",
+      "combinatorics",
+      "dp",
+      "math",
+      "probabilities"
+    ],
+    "solved_count": 38112
+  },
+  {
+    "problem_id": "1372B",
+    "contest_id": 1372,
+    "index": "B",
+    "name": "Omkar and Last Class of Math",
+    "rating": 1300,
+    "tags": [
+      "greedy",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 38058
+  },
+  {
+    "problem_id": "1831B",
+    "contest_id": 1831,
+    "index": "B",
+    "name": "Array merging",
+    "rating": 1000,
+    "tags": [
+      "constructive algorithms",
+      "greedy"
+    ],
+    "solved_count": 38003
+  },
+  {
+    "problem_id": "2195A",
+    "contest_id": 2195,
+    "index": "A",
+    "name": "Sieve of Erato67henes",
+    "rating": 800,
+    "tags": [
+      "math",
+      "number theory"
+    ],
+    "solved_count": 37899
+  },
+  {
+    "problem_id": "1420B",
+    "contest_id": 1420,
+    "index": "B",
+    "name": "Rock and Lever",
+    "rating": 1200,
+    "tags": [
+      "bitmasks",
+      "math"
+    ],
+    "solved_count": 37869
+  },
+  {
+    "problem_id": "1691B",
+    "contest_id": 1691,
+    "index": "B",
+    "name": "Shoe Shuffling",
+    "rating": 1000,
+    "tags": [
+      "constructive algorithms",
+      "greedy",
+      "implementation",
+      "two pointers"
+    ],
+    "solved_count": 37835
+  },
+  {
+    "problem_id": "1473A",
+    "contest_id": 1473,
+    "index": "A",
+    "name": "Replacing Elements",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation",
+      "math",
+      "sortings"
+    ],
+    "solved_count": 37778
+  },
+  {
+    "problem_id": "1506C",
+    "contest_id": 1506,
+    "index": "C",
+    "name": "Double-ended Strings",
+    "rating": 1000,
+    "tags": [
+      "brute force",
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 37748
+  },
+  {
+    "problem_id": "1843A",
+    "contest_id": 1843,
+    "index": "A",
+    "name": "Sasha and Array Coloring",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "sortings",
+      "two pointers"
+    ],
+    "solved_count": 37691
+  },
+  {
+    "problem_id": "1650A",
+    "contest_id": 1650,
+    "index": "A",
+    "name": "Deletions of Two Adjacent Letters",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 37547
+  },
+  {
+    "problem_id": "1899C",
+    "contest_id": 1899,
+    "index": "C",
+    "name": "Yarik and Array",
+    "rating": 1100,
+    "tags": [
+      "dp",
+      "greedy",
+      "two pointers"
+    ],
+    "solved_count": 37545
+  },
+  {
+    "problem_id": "822A",
+    "contest_id": 822,
+    "index": "A",
+    "name": "I'm bored with life",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 37484
+  },
+  {
+    "problem_id": "1800A",
+    "contest_id": 1800,
+    "index": "A",
+    "name": "Is It a Cat?",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 37477
+  },
+  {
+    "problem_id": "1303A",
+    "contest_id": 1303,
+    "index": "A",
+    "name": "Erasing Zeroes",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 37326
+  },
+  {
+    "problem_id": "2167C",
+    "contest_id": 2167,
+    "index": "C",
+    "name": "Isamatdin and His Magic Wand!",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "greedy",
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 37268
+  },
+  {
+    "problem_id": "1996B",
+    "contest_id": 1996,
+    "index": "B",
+    "name": "Scale",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation"
+    ],
+    "solved_count": 37254
+  },
+  {
+    "problem_id": "1097B",
+    "contest_id": 1097,
+    "index": "B",
+    "name": "Petr and a Combination Lock",
+    "rating": 1200,
+    "tags": [
+      "bitmasks",
+      "brute force",
+      "dp"
+    ],
+    "solved_count": 37212
+  },
+  {
+    "problem_id": "1095A",
+    "contest_id": 1095,
+    "index": "A",
+    "name": "Repeating Cipher",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 37192
+  },
+  {
+    "problem_id": "1337B",
+    "contest_id": 1337,
+    "index": "B",
+    "name": "Kana and Dragon Quest game",
+    "rating": 900,
+    "tags": [
+      "greedy",
+      "implementation",
+      "math"
+    ],
+    "solved_count": 37182
+  },
+  {
+    "problem_id": "1675A",
+    "contest_id": 1675,
+    "index": "A",
+    "name": "Food for Animals",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 37180
+  },
+  {
+    "problem_id": "275A",
+    "contest_id": 275,
+    "index": "A",
+    "name": "Lights Out",
+    "rating": 900,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 37164
+  },
+  {
+    "problem_id": "2106A",
+    "contest_id": 2106,
+    "index": "A",
+    "name": "Dr. TC",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "math"
+    ],
+    "solved_count": 37114
+  },
+  {
+    "problem_id": "2008C",
+    "contest_id": 2008,
+    "index": "C",
+    "name": "Longest Good Array",
+    "rating": 800,
+    "tags": [
+      "binary search",
+      "brute force",
+      "math"
+    ],
+    "solved_count": 37080
+  }
+]

@@ -1,0 +1,620 @@
+[
+  {
+    "problem_id": "1833A",
+    "contest_id": 1833,
+    "index": "A",
+    "name": "Musical Puzzle",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 35376
+  },
+  {
+    "problem_id": "1485A",
+    "contest_id": 1485,
+    "index": "A",
+    "name": "Add and Divide",
+    "rating": 1000,
+    "tags": [
+      "brute force",
+      "greedy",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 35343
+  },
+  {
+    "problem_id": "118B",
+    "contest_id": 118,
+    "index": "B",
+    "name": "Present from Lena",
+    "rating": 1000,
+    "tags": [
+      "constructive algorithms",
+      "implementation"
+    ],
+    "solved_count": 35217
+  },
+  {
+    "problem_id": "766A",
+    "contest_id": 766,
+    "index": "A",
+    "name": "Mahmoud and Longest Uncommon Subsequence",
+    "rating": 1000,
+    "tags": [
+      "constructive algorithms",
+      "strings"
+    ],
+    "solved_count": 35163
+  },
+  {
+    "problem_id": "1567B",
+    "contest_id": 1567,
+    "index": "B",
+    "name": "MEXor Mixup",
+    "rating": 1000,
+    "tags": [
+      "bitmasks",
+      "greedy"
+    ],
+    "solved_count": 35082
+  },
+  {
+    "problem_id": "1829D",
+    "contest_id": 1829,
+    "index": "D",
+    "name": "Gold Rush",
+    "rating": 1000,
+    "tags": [
+      "brute force",
+      "dfs and similar",
+      "dp",
+      "implementation"
+    ],
+    "solved_count": 35078
+  },
+  {
+    "problem_id": "1846A",
+    "contest_id": 1846,
+    "index": "A",
+    "name": "Rudolph and Cut the Rope ",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 35030
+  },
+  {
+    "problem_id": "1811A",
+    "contest_id": 1811,
+    "index": "A",
+    "name": "Insert Digit",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math",
+      "strings"
+    ],
+    "solved_count": 34997
+  },
+  {
+    "problem_id": "1765M",
+    "contest_id": 1765,
+    "index": "M",
+    "name": "Minimum LCM",
+    "rating": 1000,
+    "tags": [
+      "math",
+      "number theory"
+    ],
+    "solved_count": 34934
+  },
+  {
+    "problem_id": "1520C",
+    "contest_id": 1520,
+    "index": "C",
+    "name": "Not Adjacent Matrix",
+    "rating": 1000,
+    "tags": [
+      "constructive algorithms"
+    ],
+    "solved_count": 34911
+  },
+  {
+    "problem_id": "1974B",
+    "contest_id": 1974,
+    "index": "B",
+    "name": "Symmetric Encoding",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "sortings",
+      "strings"
+    ],
+    "solved_count": 34881
+  },
+  {
+    "problem_id": "1807C",
+    "contest_id": 1807,
+    "index": "C",
+    "name": "Find and Replace",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 34806
+  },
+  {
+    "problem_id": "1618A",
+    "contest_id": 1618,
+    "index": "A",
+    "name": "Polycarp and Sums of Subsequences",
+    "rating": 800,
+    "tags": [
+      "math",
+      "sortings"
+    ],
+    "solved_count": 34797
+  },
+  {
+    "problem_id": "1511C",
+    "contest_id": 1511,
+    "index": "C",
+    "name": "Yet Another Card Deck",
+    "rating": 1100,
+    "tags": [
+      "brute force",
+      "data structures",
+      "implementation",
+      "trees"
+    ],
+    "solved_count": 34612
+  },
+  {
+    "problem_id": "1553A",
+    "contest_id": 1553,
+    "index": "A",
+    "name": "Digits Sum",
+    "rating": 800,
+    "tags": [
+      "math",
+      "number theory"
+    ],
+    "solved_count": 34595
+  },
+  {
+    "problem_id": "2132B",
+    "contest_id": 2132,
+    "index": "B",
+    "name": "The Secret Number",
+    "rating": 900,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 34556
+  },
+  {
+    "problem_id": "2236A",
+    "contest_id": 2236,
+    "index": "A",
+    "name": "Games on the Train",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 34548
+  },
+  {
+    "problem_id": "1535B",
+    "contest_id": 1535,
+    "index": "B",
+    "name": "Array Reodering",
+    "rating": 900,
+    "tags": [
+      "brute force",
+      "greedy",
+      "math",
+      "number theory",
+      "sortings"
+    ],
+    "solved_count": 34529
+  },
+  {
+    "problem_id": "1878B",
+    "contest_id": 1878,
+    "index": "B",
+    "name": "Aleksa and Stack",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "math"
+    ],
+    "solved_count": 34523
+  },
+  {
+    "problem_id": "1339A",
+    "contest_id": 1339,
+    "index": "A",
+    "name": "Filling Diamonds",
+    "rating": 900,
+    "tags": [
+      "brute force",
+      "dp",
+      "implementation",
+      "math"
+    ],
+    "solved_count": 34514
+  },
+  {
+    "problem_id": "1932A",
+    "contest_id": 1932,
+    "index": "A",
+    "name": "Thorns and Coins",
+    "rating": 800,
+    "tags": [
+      "dp",
+      "greedy",
+      "implementation"
+    ],
+    "solved_count": 34458
+  },
+  {
+    "problem_id": "1931C",
+    "contest_id": 1931,
+    "index": "C",
+    "name": "Make Equal Again",
+    "rating": 1000,
+    "tags": [
+      "brute force",
+      "greedy",
+      "math"
+    ],
+    "solved_count": 34398
+  },
+  {
+    "problem_id": "349A",
+    "contest_id": 349,
+    "index": "A",
+    "name": "Cinema Line",
+    "rating": 1100,
+    "tags": [
+      "greedy",
+      "implementation"
+    ],
+    "solved_count": 34376
+  },
+  {
+    "problem_id": "1618C",
+    "contest_id": 1618,
+    "index": "C",
+    "name": "Paint the Array",
+    "rating": 1100,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 34360
+  },
+  {
+    "problem_id": "1714B",
+    "contest_id": 1714,
+    "index": "B",
+    "name": "Remove Prefix",
+    "rating": 800,
+    "tags": [
+      "data structures",
+      "greedy",
+      "implementation"
+    ],
+    "solved_count": 34352
+  },
+  {
+    "problem_id": "445A",
+    "contest_id": 445,
+    "index": "A",
+    "name": "DZY Loves Chessboard",
+    "rating": 1200,
+    "tags": [
+      "dfs and similar",
+      "implementation"
+    ],
+    "solved_count": 34313
+  },
+  {
+    "problem_id": "1676E",
+    "contest_id": 1676,
+    "index": "E",
+    "name": "Eating Queries",
+    "rating": 1100,
+    "tags": [
+      "binary search",
+      "greedy",
+      "sortings"
+    ],
+    "solved_count": 34258
+  },
+  {
+    "problem_id": "1741A",
+    "contest_id": 1741,
+    "index": "A",
+    "name": "Compare T-Shirt Sizes",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 34045
+  },
+  {
+    "problem_id": "2149B",
+    "contest_id": 2149,
+    "index": "B",
+    "name": "Unconventional Pairs",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "sortings"
+    ],
+    "solved_count": 34024
+  },
+  {
+    "problem_id": "2055A",
+    "contest_id": 2055,
+    "index": "A",
+    "name": "Two Frogs",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "games",
+      "greedy",
+      "math"
+    ],
+    "solved_count": 34017
+  },
+  {
+    "problem_id": "2086A",
+    "contest_id": 2086,
+    "index": "A",
+    "name": "Cloudberry Jam",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 33993
+  },
+  {
+    "problem_id": "2004A",
+    "contest_id": 2004,
+    "index": "A",
+    "name": "Closest Point",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 33990
+  },
+  {
+    "problem_id": "1538B",
+    "contest_id": 1538,
+    "index": "B",
+    "name": "Friends and Candies",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 33929
+  },
+  {
+    "problem_id": "1790D",
+    "contest_id": 1790,
+    "index": "D",
+    "name": "Matryoshkas",
+    "rating": 1200,
+    "tags": [
+      "data structures",
+      "greedy",
+      "sortings"
+    ],
+    "solved_count": 33897
+  },
+  {
+    "problem_id": "2094B",
+    "contest_id": 2094,
+    "index": "B",
+    "name": "Bobritto Bandito",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "constructive algorithms"
+    ],
+    "solved_count": 33846
+  },
+  {
+    "problem_id": "2009C",
+    "contest_id": 2009,
+    "index": "C",
+    "name": "The Legend of Freya the Frog",
+    "rating": 1100,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 33834
+  },
+  {
+    "problem_id": "2014B",
+    "contest_id": 2014,
+    "index": "B",
+    "name": "Robin Hood and the Major Oak",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 33817
+  },
+  {
+    "problem_id": "1992C",
+    "contest_id": 1992,
+    "index": "C",
+    "name": "Gorilla and Permutation",
+    "rating": 900,
+    "tags": [
+      "constructive algorithms",
+      "math"
+    ],
+    "solved_count": 33817
+  },
+  {
+    "problem_id": "1714C",
+    "contest_id": 1714,
+    "index": "C",
+    "name": "Minimum  Varied Number",
+    "rating": 800,
+    "tags": [
+      "greedy"
+    ],
+    "solved_count": 33747
+  },
+  {
+    "problem_id": "1997A",
+    "contest_id": 1997,
+    "index": "A",
+    "name": "Strong Password",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 33722
+  },
+  {
+    "problem_id": "1519B",
+    "contest_id": 1519,
+    "index": "B",
+    "name": "The Cake Is a Lie",
+    "rating": 800,
+    "tags": [
+      "dp",
+      "math"
+    ],
+    "solved_count": 33648
+  },
+  {
+    "problem_id": "1909B",
+    "contest_id": 1909,
+    "index": "B",
+    "name": "Make Almost Equal With Mod",
+    "rating": 1200,
+    "tags": [
+      "bitmasks",
+      "constructive algorithms",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 33643
+  },
+  {
+    "problem_id": "1611A",
+    "contest_id": 1611,
+    "index": "A",
+    "name": "Make Even",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "math"
+    ],
+    "solved_count": 33636
+  },
+  {
+    "problem_id": "1372A",
+    "contest_id": 1372,
+    "index": "A",
+    "name": "Omkar and Completion",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "implementation"
+    ],
+    "solved_count": 33613
+  },
+  {
+    "problem_id": "1914B",
+    "contest_id": 1914,
+    "index": "B",
+    "name": "Preparing for the Contest",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "math"
+    ],
+    "solved_count": 33559
+  },
+  {
+    "problem_id": "1714A",
+    "contest_id": 1714,
+    "index": "A",
+    "name": "Everyone Loves to Sleep",
+    "rating": 900,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 33535
+  },
+  {
+    "problem_id": "1926C",
+    "contest_id": 1926,
+    "index": "C",
+    "name": "Vlad and a Sum of Sum of Digits",
+    "rating": 1200,
+    "tags": [
+      "dp",
+      "implementation"
+    ],
+    "solved_count": 33520
+  },
+  {
+    "problem_id": "1772B",
+    "contest_id": 1772,
+    "index": "B",
+    "name": "Matrix Rotation",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "implementation"
+    ],
+    "solved_count": 33448
+  },
+  {
+    "problem_id": "1632B",
+    "contest_id": 1632,
+    "index": "B",
+    "name": "Roof Construction",
+    "rating": 1000,
+    "tags": [
+      "bitmasks",
+      "constructive algorithms"
+    ],
+    "solved_count": 33445
+  },
+  {
+    "problem_id": "1328C",
+    "contest_id": 1328,
+    "index": "C",
+    "name": "Ternary XOR",
+    "rating": 1200,
+    "tags": [
+      "greedy",
+      "implementation"
+    ],
+    "solved_count": 33445
+  }
+]

@@ -1303,9 +1303,24 @@ def _classic_specs() -> list[ProblemOracleSpec]:
     return specs
 
 
-ORACLE_REGISTRY: dict[str, ProblemOracleSpec] = {
-    spec.problem_id: spec for spec in _classic_specs()
-}
+def _build_oracle_registry() -> dict[str, ProblemOracleSpec]:
+    """Merge classic hand-written specs with bulk catalog modules."""
+    registry: dict[str, ProblemOracleSpec] = {
+        spec.problem_id: spec for spec in _classic_specs()
+    }
+    try:
+        from contestiq_api.practice_packs.catalog import load_catalog_specs
+
+        for spec in load_catalog_specs():
+            # Classic specs win on conflict so legacy regressions stay stable.
+            registry.setdefault(spec.problem_id, spec)
+    except Exception:  # noqa: BLE001
+        # Catalog is additive; classic registry must still load if bulk import fails.
+        pass
+    return registry
+
+
+ORACLE_REGISTRY: dict[str, ProblemOracleSpec] = _build_oracle_registry()
 
 
 def build_candidate_pack(
@@ -1373,6 +1388,45 @@ def build_candidate_pack(
     )
     quality["mutation"] = mutation.as_dict()
 
+    # False-WA defense: official sample outputs must match primary oracle.
+    sample_mismatches = 0
+    for sample in spec.sample_tests:
+        actual = primary(sample["input"])
+        if not outputs_match(actual, sample["output"], checker_type=spec.checker_type):
+            sample_mismatches += 1
+    if sample_mismatches:
+        quality["passed"] = False
+        quality.setdefault("failures", []).append(
+            f"official sample mismatch on {sample_mismatches} sample(s)"
+        )
+
+    # False-AC defense already encoded in mutation score; attach normalized score.
+    from contestiq_api.practice_packs.quality_score import attach_quality_score
+
+    family = "general"
+    if ":" in (spec.oracle_strategy or ""):
+        family = spec.oracle_strategy.rsplit(":", 1)[-1]
+    quality = attach_quality_score(
+        quality,
+        mutation_score=mutation.mutation_score,
+        test_count=len(tests),
+        oracle_count=len(spec.oracles),
+        oracles_agree=disagreements == 0,
+        has_sample=has_sample and sample_mismatches == 0,
+        checker_type=spec.checker_type,
+        surviving_mutants=len(mutation.surviving),
+    )
+
+    # Auto-activate only when hard gates pass AND score policy says so.
+    recommendation = quality.get("recommendation")
+    if quality.get("passed") and recommendation == "auto_activate":
+        review_state = "reviewed"
+    elif quality.get("passed") and recommendation == "review_required":
+        review_state = "review_required"
+    else:
+        review_state = "validation_failed"
+        quality["passed"] = False if recommendation == "reject" else quality.get("passed")
+
     return {
         "pack_id": f"solvex-auto-{problem_id.lower()}-v{spec.pack_version}",
         "problem_id": problem_id,
@@ -1383,16 +1437,19 @@ def build_candidate_pack(
         "constraints_text": spec.constraints_text,
         "sample_tests": [dict(s) for s in spec.sample_tests],
         "judge_tests": tests,
-        "review_state": "reviewed" if quality["passed"] else "validation_failed",
+        "review_state": review_state,
         "checker_type": spec.checker_type,
         "oracle_strategy": spec.oracle_strategy,
+        "oracle_family": family,
         "provenance": {
             "source": "solvex_auto_oracle_registry",
             "oracle_strategy": spec.oracle_strategy,
+            "oracle_family": family,
             "rng_seed": rng_seed,
             "not_official_cf_tests": True,
         },
         "quality_report": quality,
+        "quality_score": quality.get("quality_score"),
         "mutation_score": mutation.mutation_score,
         "test_count": len(tests),
     }

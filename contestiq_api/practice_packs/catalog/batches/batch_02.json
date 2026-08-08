@@ -1,0 +1,603 @@
+[
+  {
+    "problem_id": "432A",
+    "contest_id": 432,
+    "index": "A",
+    "name": "Choosing Teams",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 70792
+  },
+  {
+    "problem_id": "363B",
+    "contest_id": 363,
+    "index": "B",
+    "name": "Fence",
+    "rating": 1100,
+    "tags": [
+      "brute force",
+      "dp"
+    ],
+    "solved_count": 70330
+  },
+  {
+    "problem_id": "1367A",
+    "contest_id": 1367,
+    "index": "A",
+    "name": "Short Substrings",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 68947
+  },
+  {
+    "problem_id": "1703B",
+    "contest_id": 1703,
+    "index": "B",
+    "name": "ICPC Balloons",
+    "rating": 800,
+    "tags": [
+      "data structures",
+      "implementation"
+    ],
+    "solved_count": 68567
+  },
+  {
+    "problem_id": "1520D",
+    "contest_id": 1520,
+    "index": "D",
+    "name": "Same Differences",
+    "rating": 1200,
+    "tags": [
+      "data structures",
+      "hashing",
+      "math"
+    ],
+    "solved_count": 68435
+  },
+  {
+    "problem_id": "80A",
+    "contest_id": 80,
+    "index": "A",
+    "name": "Panoramix's Prediction",
+    "rating": 800,
+    "tags": [
+      "brute force"
+    ],
+    "solved_count": 68129
+  },
+  {
+    "problem_id": "703A",
+    "contest_id": 703,
+    "index": "A",
+    "name": "Mishka and Game",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 68088
+  },
+  {
+    "problem_id": "34B",
+    "contest_id": 34,
+    "index": "B",
+    "name": "Sale",
+    "rating": 900,
+    "tags": [
+      "greedy",
+      "sortings"
+    ],
+    "solved_count": 68083
+  },
+  {
+    "problem_id": "431A",
+    "contest_id": 431,
+    "index": "A",
+    "name": "Black Square",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 67661
+  },
+  {
+    "problem_id": "1722A",
+    "contest_id": 1722,
+    "index": "A",
+    "name": "Spell Check",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 67546
+  },
+  {
+    "problem_id": "1374C",
+    "contest_id": 1374,
+    "index": "C",
+    "name": "Move Brackets",
+    "rating": 1000,
+    "tags": [
+      "greedy",
+      "strings"
+    ],
+    "solved_count": 67090
+  },
+  {
+    "problem_id": "1370A",
+    "contest_id": 1370,
+    "index": "A",
+    "name": "Maximum GCD",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 66902
+  },
+  {
+    "problem_id": "1343B",
+    "contest_id": 1343,
+    "index": "B",
+    "name": "Balanced Array",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "math"
+    ],
+    "solved_count": 66595
+  },
+  {
+    "problem_id": "313A",
+    "contest_id": 313,
+    "index": "A",
+    "name": "Ilya and Bank Account",
+    "rating": 900,
+    "tags": [
+      "implementation",
+      "number theory"
+    ],
+    "solved_count": 66414
+  },
+  {
+    "problem_id": "474B",
+    "contest_id": 474,
+    "index": "B",
+    "name": "Worms",
+    "rating": 1200,
+    "tags": [
+      "binary search",
+      "implementation"
+    ],
+    "solved_count": 65928
+  },
+  {
+    "problem_id": "1367B",
+    "contest_id": 1367,
+    "index": "B",
+    "name": "Even Array",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 65761
+  },
+  {
+    "problem_id": "1374A",
+    "contest_id": 1374,
+    "index": "A",
+    "name": "Required Remainder",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 65609
+  },
+  {
+    "problem_id": "1850D",
+    "contest_id": 1850,
+    "index": "D",
+    "name": "Balanced Round",
+    "rating": 900,
+    "tags": [
+      "brute force",
+      "greedy",
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 65233
+  },
+  {
+    "problem_id": "492A",
+    "contest_id": 492,
+    "index": "A",
+    "name": "Vanya and Cubes",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 65150
+  },
+  {
+    "problem_id": "1881A",
+    "contest_id": 1881,
+    "index": "A",
+    "name": "Don't Try to Count",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "strings"
+    ],
+    "solved_count": 64939
+  },
+  {
+    "problem_id": "500A",
+    "contest_id": 500,
+    "index": "A",
+    "name": "New Year Transportation",
+    "rating": 1000,
+    "tags": [
+      "dfs and similar",
+      "graphs",
+      "implementation"
+    ],
+    "solved_count": 64548
+  },
+  {
+    "problem_id": "1883B",
+    "contest_id": 1883,
+    "index": "B",
+    "name": "Chemistry",
+    "rating": 900,
+    "tags": [
+      "strings"
+    ],
+    "solved_count": 64535
+  },
+  {
+    "problem_id": "1873B",
+    "contest_id": 1873,
+    "index": "B",
+    "name": "Good Kid",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "greedy",
+      "math"
+    ],
+    "solved_count": 64322
+  },
+  {
+    "problem_id": "1619A",
+    "contest_id": 1619,
+    "index": "A",
+    "name": "Square String?",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 63904
+  },
+  {
+    "problem_id": "1433A",
+    "contest_id": 1433,
+    "index": "A",
+    "name": "Boring Apartments",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 63770
+  },
+  {
+    "problem_id": "1926A",
+    "contest_id": 1926,
+    "index": "A",
+    "name": "Vlad and the Best of Five",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 63733
+  },
+  {
+    "problem_id": "1896A",
+    "contest_id": 1896,
+    "index": "A",
+    "name": "Jagged Swaps",
+    "rating": 800,
+    "tags": [
+      "sortings"
+    ],
+    "solved_count": 63597
+  },
+  {
+    "problem_id": "2044A",
+    "contest_id": 2044,
+    "index": "A",
+    "name": "Easy Problem",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "math"
+    ],
+    "solved_count": 63137
+  },
+  {
+    "problem_id": "1742B",
+    "contest_id": 1742,
+    "index": "B",
+    "name": "Increasing",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 62845
+  },
+  {
+    "problem_id": "1890A",
+    "contest_id": 1890,
+    "index": "A",
+    "name": "Doremy's Paint 3",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms"
+    ],
+    "solved_count": 62579
+  },
+  {
+    "problem_id": "1878C",
+    "contest_id": 1878,
+    "index": "C",
+    "name": "Vasilije in Cacak",
+    "rating": 900,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 62298
+  },
+  {
+    "problem_id": "1676B",
+    "contest_id": 1676,
+    "index": "B",
+    "name": "Equal Candies",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math",
+      "sortings"
+    ],
+    "solved_count": 62258
+  },
+  {
+    "problem_id": "1283A",
+    "contest_id": 1283,
+    "index": "A",
+    "name": "Minutes Before the New Year",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 62243
+  },
+  {
+    "problem_id": "1772A",
+    "contest_id": 1772,
+    "index": "A",
+    "name": "A+B?",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 61991
+  },
+  {
+    "problem_id": "2167A",
+    "contest_id": 2167,
+    "index": "A",
+    "name": "Square?",
+    "rating": 800,
+    "tags": [
+      "math",
+      "sortings"
+    ],
+    "solved_count": 61645
+  },
+  {
+    "problem_id": "1807D",
+    "contest_id": 1807,
+    "index": "D",
+    "name": "Odd Queries",
+    "rating": 900,
+    "tags": [
+      "data structures",
+      "implementation"
+    ],
+    "solved_count": 61560
+  },
+  {
+    "problem_id": "1624A",
+    "contest_id": 1624,
+    "index": "A",
+    "name": "Plus One on the Subset",
+    "rating": 800,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 61158
+  },
+  {
+    "problem_id": "1472B",
+    "contest_id": 1472,
+    "index": "B",
+    "name": "Fair Division",
+    "rating": 800,
+    "tags": [
+      "dp",
+      "greedy",
+      "math"
+    ],
+    "solved_count": 61039
+  },
+  {
+    "problem_id": "1971A",
+    "contest_id": 1971,
+    "index": "A",
+    "name": "My First Sorting Problem",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 60950
+  },
+  {
+    "problem_id": "1853A",
+    "contest_id": 1853,
+    "index": "A",
+    "name": "Desorting",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "greedy",
+      "math"
+    ],
+    "solved_count": 60463
+  },
+  {
+    "problem_id": "1862B",
+    "contest_id": 1862,
+    "index": "B",
+    "name": "Sequence Game",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms"
+    ],
+    "solved_count": 59654
+  },
+  {
+    "problem_id": "1353B",
+    "contest_id": 1353,
+    "index": "B",
+    "name": "Two Arrays And Swaps",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "sortings"
+    ],
+    "solved_count": 59388
+  },
+  {
+    "problem_id": "1520A",
+    "contest_id": 1520,
+    "index": "A",
+    "name": "Do Not Be Distracted!",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "implementation"
+    ],
+    "solved_count": 59379
+  },
+  {
+    "problem_id": "1551A",
+    "contest_id": 1551,
+    "index": "A",
+    "name": "Polycarp and Coins",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 59286
+  },
+  {
+    "problem_id": "1859A",
+    "contest_id": 1859,
+    "index": "A",
+    "name": "United We Stand",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 58984
+  },
+  {
+    "problem_id": "1837A",
+    "contest_id": 1837,
+    "index": "A",
+    "name": "Grasshopper on a Line",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "math"
+    ],
+    "solved_count": 58957
+  },
+  {
+    "problem_id": "1996A",
+    "contest_id": 1996,
+    "index": "A",
+    "name": "Legs",
+    "rating": 800,
+    "tags": [
+      "binary search",
+      "math",
+      "ternary search"
+    ],
+    "solved_count": 58881
+  },
+  {
+    "problem_id": "1475B",
+    "contest_id": 1475,
+    "index": "B",
+    "name": "New Year's Number",
+    "rating": 900,
+    "tags": [
+      "brute force",
+      "dp",
+      "math"
+    ],
+    "solved_count": 58537
+  },
+  {
+    "problem_id": "456A",
+    "contest_id": 456,
+    "index": "A",
+    "name": "Laptops",
+    "rating": 1100,
+    "tags": [
+      "sortings"
+    ],
+    "solved_count": 58467
+  },
+  {
+    "problem_id": "749A",
+    "contest_id": 749,
+    "index": "A",
+    "name": "Bachgold Problem",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 58197
+  }
+]

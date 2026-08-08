@@ -1,8 +1,11 @@
 """SolveX practice pack generation, validation, and activation."""
 
 from contestiq_api.practice_packs.classify import (
+    AUTO_HIGH_CONFIDENCE,
+    AUTO_POSSIBLE,
     AUTO_PACK_POSSIBLE,
     REVIEW_PACK_POSSIBLE,
+    REVIEW_REQUIRED,
     UNSUPPORTED,
     classify_problem,
 )
@@ -16,8 +19,11 @@ from contestiq_api.practice_packs.pipeline import (
 )
 
 __all__ = [
+    "AUTO_HIGH_CONFIDENCE",
+    "AUTO_POSSIBLE",
     "AUTO_PACK_POSSIBLE",
     "REVIEW_PACK_POSSIBLE",
+    "REVIEW_REQUIRED",
     "UNSUPPORTED",
     "activate_oracle_packs",
     "classify_problem",

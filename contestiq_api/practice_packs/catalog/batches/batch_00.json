@@ -1,0 +1,593 @@
+[
+  {
+    "problem_id": "50A",
+    "contest_id": 50,
+    "index": "A",
+    "name": "Domino piling",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "math"
+    ],
+    "solved_count": 329876
+  },
+  {
+    "problem_id": "118A",
+    "contest_id": 118,
+    "index": "A",
+    "name": "String Task",
+    "rating": 1000,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 237239
+  },
+  {
+    "problem_id": "59A",
+    "contest_id": 59,
+    "index": "A",
+    "name": "Word",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 236405
+  },
+  {
+    "problem_id": "69A",
+    "contest_id": 69,
+    "index": "A",
+    "name": "Young Physicist",
+    "rating": 1000,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 207449
+  },
+  {
+    "problem_id": "110A",
+    "contest_id": 110,
+    "index": "A",
+    "name": "Nearly Lucky Number",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 206276
+  },
+  {
+    "problem_id": "734A",
+    "contest_id": 734,
+    "index": "A",
+    "name": "Anton and Danik",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 201979
+  },
+  {
+    "problem_id": "96A",
+    "contest_id": 96,
+    "index": "A",
+    "name": "Football",
+    "rating": 900,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 199002
+  },
+  {
+    "problem_id": "41A",
+    "contest_id": 41,
+    "index": "A",
+    "name": "Translation",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 194804
+  },
+  {
+    "problem_id": "677A",
+    "contest_id": 677,
+    "index": "A",
+    "name": "Vanya and Fence",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 186186
+  },
+  {
+    "problem_id": "271A",
+    "contest_id": 271,
+    "index": "A",
+    "name": "Beautiful Year",
+    "rating": 800,
+    "tags": [
+      "brute force"
+    ],
+    "solved_count": 183782
+  },
+  {
+    "problem_id": "1030A",
+    "contest_id": 1030,
+    "index": "A",
+    "name": "In Search of an Easy Problem",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 177517
+  },
+  {
+    "problem_id": "467A",
+    "contest_id": 467,
+    "index": "A",
+    "name": "George and Accommodation",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 160874
+  },
+  {
+    "problem_id": "58A",
+    "contest_id": 58,
+    "index": "A",
+    "name": "Chat room",
+    "rating": 1000,
+    "tags": [
+      "greedy",
+      "strings"
+    ],
+    "solved_count": 160017
+  },
+  {
+    "problem_id": "344A",
+    "contest_id": 344,
+    "index": "A",
+    "name": "Magnets",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 157925
+  },
+  {
+    "problem_id": "122A",
+    "contest_id": 122,
+    "index": "A",
+    "name": "Lucky Division",
+    "rating": 1000,
+    "tags": [
+      "brute force",
+      "number theory"
+    ],
+    "solved_count": 153745
+  },
+  {
+    "problem_id": "200B",
+    "contest_id": 200,
+    "index": "B",
+    "name": "Drinks",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 153188
+  },
+  {
+    "problem_id": "136A",
+    "contest_id": 136,
+    "index": "A",
+    "name": "Presents",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 151037
+  },
+  {
+    "problem_id": "160A",
+    "contest_id": 160,
+    "index": "A",
+    "name": "Twins",
+    "rating": 900,
+    "tags": [
+      "greedy",
+      "sortings"
+    ],
+    "solved_count": 148980
+  },
+  {
+    "problem_id": "318A",
+    "contest_id": 318,
+    "index": "A",
+    "name": "Even Odds",
+    "rating": 900,
+    "tags": [
+      "math"
+    ],
+    "solved_count": 147138
+  },
+  {
+    "problem_id": "228A",
+    "contest_id": 228,
+    "index": "A",
+    "name": "Is your horseshoe on the other hoof?",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 144682
+  },
+  {
+    "problem_id": "61A",
+    "contest_id": 61,
+    "index": "A",
+    "name": "Ultra-Fast Mathematician",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 140111
+  },
+  {
+    "problem_id": "705A",
+    "contest_id": 705,
+    "index": "A",
+    "name": "Hulk",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 135910
+  },
+  {
+    "problem_id": "520A",
+    "contest_id": 520,
+    "index": "A",
+    "name": "Pangram",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 131740
+  },
+  {
+    "problem_id": "405A",
+    "contest_id": 405,
+    "index": "A",
+    "name": "Gravity Flip",
+    "rating": 900,
+    "tags": [
+      "greedy",
+      "implementation",
+      "sortings"
+    ],
+    "solved_count": 130317
+  },
+  {
+    "problem_id": "133A",
+    "contest_id": 133,
+    "index": "A",
+    "name": "HQ9+",
+    "rating": 900,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 127982
+  },
+  {
+    "problem_id": "144A",
+    "contest_id": 144,
+    "index": "A",
+    "name": "Arrival of the General",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 125230
+  },
+  {
+    "problem_id": "469A",
+    "contest_id": 469,
+    "index": "A",
+    "name": "I Wanna Be the Guy",
+    "rating": 800,
+    "tags": [
+      "greedy",
+      "implementation"
+    ],
+    "solved_count": 124753
+  },
+  {
+    "problem_id": "996A",
+    "contest_id": 996,
+    "index": "A",
+    "name": "Hit the Lottery",
+    "rating": 800,
+    "tags": [
+      "dp",
+      "greedy"
+    ],
+    "solved_count": 122644
+  },
+  {
+    "problem_id": "443A",
+    "contest_id": 443,
+    "index": "A",
+    "name": "Anton and Letters",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "implementation"
+    ],
+    "solved_count": 115780
+  },
+  {
+    "problem_id": "148A",
+    "contest_id": 148,
+    "index": "A",
+    "name": "Insomnia cure",
+    "rating": 800,
+    "tags": [
+      "constructive algorithms",
+      "implementation",
+      "math"
+    ],
+    "solved_count": 115207
+  },
+  {
+    "problem_id": "479A",
+    "contest_id": 479,
+    "index": "A",
+    "name": "Expression",
+    "rating": 1000,
+    "tags": [
+      "brute force",
+      "math"
+    ],
+    "solved_count": 115056
+  },
+  {
+    "problem_id": "785A",
+    "contest_id": 785,
+    "index": "A",
+    "name": "Anton and Polyhedrons",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 114257
+  },
+  {
+    "problem_id": "4C",
+    "contest_id": 4,
+    "index": "C",
+    "name": "Registration System",
+    "rating": 1300,
+    "tags": [
+      "data structures",
+      "hashing",
+      "implementation"
+    ],
+    "solved_count": 113639
+  },
+  {
+    "problem_id": "510A",
+    "contest_id": 510,
+    "index": "A",
+    "name": "Fox And Snake",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 109462
+  },
+  {
+    "problem_id": "1742A",
+    "contest_id": 1742,
+    "index": "A",
+    "name": "Sum",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 108740
+  },
+  {
+    "problem_id": "580A",
+    "contest_id": 580,
+    "index": "A",
+    "name": "Kefa and First Steps",
+    "rating": 900,
+    "tags": [
+      "brute force",
+      "dp",
+      "implementation"
+    ],
+    "solved_count": 108483
+  },
+  {
+    "problem_id": "208A",
+    "contest_id": 208,
+    "index": "A",
+    "name": "Dubstep",
+    "rating": 900,
+    "tags": [
+      "strings"
+    ],
+    "solved_count": 107441
+  },
+  {
+    "problem_id": "268A",
+    "contest_id": 268,
+    "index": "A",
+    "name": "Games",
+    "rating": 800,
+    "tags": [
+      "brute force"
+    ],
+    "solved_count": 106772
+  },
+  {
+    "problem_id": "158B",
+    "contest_id": 158,
+    "index": "B",
+    "name": "Taxi",
+    "rating": 1100,
+    "tags": [
+      "*special",
+      "greedy",
+      "implementation"
+    ],
+    "solved_count": 106728
+  },
+  {
+    "problem_id": "25A",
+    "contest_id": 25,
+    "index": "A",
+    "name": "IQ test",
+    "rating": 1300,
+    "tags": [
+      "brute force"
+    ],
+    "solved_count": 106377
+  },
+  {
+    "problem_id": "141A",
+    "contest_id": 141,
+    "index": "A",
+    "name": "Amusing Joke",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "sortings",
+      "strings"
+    ],
+    "solved_count": 104230
+  },
+  {
+    "problem_id": "723A",
+    "contest_id": 723,
+    "index": "A",
+    "name": "The New Year: Meeting Friends",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "math",
+      "sortings"
+    ],
+    "solved_count": 103940
+  },
+  {
+    "problem_id": "131A",
+    "contest_id": 131,
+    "index": "A",
+    "name": "cAPS lOCK",
+    "rating": 1000,
+    "tags": [
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 103435
+  },
+  {
+    "problem_id": "230A",
+    "contest_id": 230,
+    "index": "A",
+    "name": "Dragons",
+    "rating": 1000,
+    "tags": [
+      "greedy",
+      "sortings"
+    ],
+    "solved_count": 101831
+  },
+  {
+    "problem_id": "1899A",
+    "contest_id": 1899,
+    "index": "A",
+    "name": "Game with Integers",
+    "rating": 800,
+    "tags": [
+      "games",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 101092
+  },
+  {
+    "problem_id": "1703A",
+    "contest_id": 1703,
+    "index": "A",
+    "name": "YES or YES?",
+    "rating": 800,
+    "tags": [
+      "brute force",
+      "implementation",
+      "strings"
+    ],
+    "solved_count": 100680
+  },
+  {
+    "problem_id": "427A",
+    "contest_id": 427,
+    "index": "A",
+    "name": "Police Recruits",
+    "rating": 800,
+    "tags": [
+      "implementation"
+    ],
+    "solved_count": 100136
+  },
+  {
+    "problem_id": "230B",
+    "contest_id": 230,
+    "index": "B",
+    "name": "T-primes",
+    "rating": 1300,
+    "tags": [
+      "binary search",
+      "implementation",
+      "math",
+      "number theory"
+    ],
+    "solved_count": 99864
+  },
+  {
+    "problem_id": "151A",
+    "contest_id": 151,
+    "index": "A",
+    "name": "Soft Drinking",
+    "rating": 800,
+    "tags": [
+      "implementation",
+      "math"
+    ],
+    "solved_count": 97876
+  },
+  {
+    "problem_id": "337A",
+    "contest_id": 337,
+    "index": "A",
+    "name": "Puzzles",
+    "rating": 900,
+    "tags": [
+      "greedy"
+    ],
+    "solved_count": 97491
+  }
+]

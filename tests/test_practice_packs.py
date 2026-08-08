@@ -90,6 +90,11 @@ def test_11a_pack_passes_quality_and_kills_mutants():
 
 
 def test_all_registry_packs_pass_quality_gates():
+    """Every registry entry must either auto-activate or be absent.
+
+    Fail-closed catalog filtering removes weak specs; remaining packs must
+    clear hard gates and the auto-activate quality score.
+    """
     failed = []
     for problem_id in sorted(ORACLE_REGISTRY):
         try:
@@ -97,8 +102,9 @@ def test_all_registry_packs_pass_quality_gates():
         except Exception as exc:  # noqa: BLE001
             failed.append((problem_id, str(exc)))
             continue
-        if not pack["quality_report"]["passed"]:
-            failed.append((problem_id, pack["quality_report"]["failures"]))
+        q = pack["quality_report"]
+        if not (q.get("passed") and q.get("recommendation") == "auto_activate"):
+            failed.append((problem_id, q.get("failures") or q.get("recommendation")))
     assert failed == []
 
 

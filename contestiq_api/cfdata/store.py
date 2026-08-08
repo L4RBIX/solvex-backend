@@ -810,6 +810,8 @@ CREATE TABLE IF NOT EXISTS duel_problem_packs (
     mutation_score REAL,
     test_count INTEGER,
     activated_at TEXT,
+    quality_score REAL,
+    oracle_family TEXT,
     UNIQUE(problem_id, version)
 );
 CREATE INDEX IF NOT EXISTS idx_duel_problem_packs_active
@@ -824,7 +826,12 @@ CREATE TABLE IF NOT EXISTS practice_pack_jobs (
     last_error TEXT,
     quality_report TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    priority_score REAL,
+    leased_until TEXT,
+    leased_by TEXT,
+    next_attempt_at TEXT,
+    oracle_family TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_practice_pack_jobs_status
     ON practice_pack_jobs (status, updated_at);
@@ -1145,6 +1152,15 @@ _COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("mutation_score", "REAL"),
         ("test_count", "INTEGER"),
         ("activated_at", "TEXT"),
+        ("quality_score", "REAL"),
+        ("oracle_family", "TEXT"),
+    ],
+    "practice_pack_jobs": [
+        ("priority_score", "REAL"),
+        ("leased_until", "TEXT"),
+        ("leased_by", "TEXT"),
+        ("next_attempt_at", "TEXT"),
+        ("oracle_family", "TEXT"),
     ],
 }
 
