@@ -22,6 +22,7 @@ from contestiq_api.routes import (
     b2b,
     billing,
     coach,
+    contests,
     copilot,
     episodes,
     execute,
@@ -319,6 +320,46 @@ def _relay_backoff_iso(attempts: int, *, blocked: bool = False) -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
 
 
+async def _periodic_contest_watcher() -> None:
+    """Detect finished Codeforces contests and run the zero-day pipeline."""
+    interval = float(settings.contest_watcher_interval_seconds or 0.0)
+    if interval <= 0:
+        logger.info("periodic_contest_watcher disabled")
+        return
+
+    from contestiq_api.contests.pipeline import refresh_open_contest_readiness, tick_contest_pipelines
+    from contestiq_api.contests.watcher import poll_contests
+    from contestiq_api.practice_packs import batch as pack_batch
+
+    await asyncio.sleep(45)
+    logger.info(json.dumps({"event": "contest_watcher_start", "interval_seconds": interval}))
+    while True:
+        try:
+            poll = await asyncio.to_thread(lambda: poll_contests(gym=False, max_age_seconds=90))
+            tick = await asyncio.to_thread(lambda: tick_contest_pipelines(limit=2))
+            ready = await asyncio.to_thread(lambda: refresh_open_contest_readiness(limit_contests=12))
+            # Keep pack factory draining in the background for registry problems.
+            packs = await asyncio.to_thread(
+                lambda: pack_batch.run_batch(limit=15, worker_id="contest-watcher")
+            )
+            logger.info(
+                json.dumps(
+                    {
+                        "event": "contest_watcher_tick",
+                        "poll": poll,
+                        "pipelines": tick.get("processed"),
+                        "readiness_contests": ready.get("contests"),
+                        "pack_claimed": packs.get("claimed"),
+                        "pack_activated": packs.get("activated"),
+                    },
+                    default=str,
+                )
+            )
+        except Exception:
+            logger.exception("periodic_contest_watcher failed")
+        await asyncio.sleep(max(30.0, interval))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     diag = _log_storage_diagnostics()
@@ -326,6 +367,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_periodic_codeforces_catalog_sync())
     asyncio.create_task(_periodic_statement_ingest())
     asyncio.create_task(_embedded_statement_relay())
+    asyncio.create_task(_periodic_contest_watcher())
 
     async def _seed_practice_packs() -> None:
         try:
@@ -433,3 +475,4 @@ app.include_router(leaderboards.router)
 app.include_router(duels.router)
 app.include_router(problems.router)
 app.include_router(practice.router)
+app.include_router(contests.router)
